@@ -125,7 +125,23 @@ npm run build         # 产物在 apps/extension/dist
    `apps/backend/.env` 后填写（`AKC_VAULT_PATH`、`AKC_CLAUDE_API_KEY`、`AKC_CLAUDE_MODEL`），重启后端生效
 5. 打开任意受支持平台 → 打开 Side Panel → 「保存当前对话」
 
-### 4.3 一键命令
+### 4.3 一键脚本（推荐：一次配置，永久服务）
+
+不想每次手敲命令，就用 `scripts/` 下的一键脚本 —— 双击即可：
+
+| 平台 | 位置 | 说明 |
+| --- | --- | --- |
+| Windows | `scripts\windows\install.bat` | 装依赖 + 构建扩展 + 生成 `.env` |
+| Windows | `scripts\windows\start.bat` / `stop.bat` / `status.bat` | 启停与状态 |
+| Windows | `scripts\windows\autostart.bat` | **登录即自动启动**，配置一次即可 |
+| Linux / VPS | `scripts/linux/install.sh` | 安装为 systemd 服务（开机自启 + 崩溃自动拉起） |
+| Linux / VPS | `scripts/linux/deploy.sh user@host` | 改完代码一条命令同步并重启 |
+
+详见 [scripts/README.md](scripts/README.md)。
+后端放到 VPS 后，扩展推荐用 **SSH 隧道** 连接（扩展配置零改动、流量加密）：
+`ssh -N -L 38127:127.0.0.1:38127 user@your-vps`
+
+### 4.4 常用命令
 
 ```bash
 make bootstrap   # 装齐依赖

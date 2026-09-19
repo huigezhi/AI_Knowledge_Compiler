@@ -1,0 +1,33 @@
+[Unit]
+Description=AI Knowledge Compiler (AKC) local-first backend
+Documentation=https://github.com/huigezhi/AI_Knowledge_Compiler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__AKC_USER__
+Group=__AKC_USER__
+WorkingDirectory=__AKC_DIR__/apps/backend
+EnvironmentFile=__AKC_ENVFILE__
+ExecStart=__AKC_DIR__/apps/backend/.venv/bin/python -m akc
+
+# 崩溃/异常退出自动拉起：一次配置，永久服务
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+# 安全加固（本地-first 服务不应该拥有过多权限）
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=__AKC_DATA_DIR__ __AKC_VAULT_DIR__
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=akc
+
+[Install]
+WantedBy=multi-user.target

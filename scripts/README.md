@@ -1,0 +1,148 @@
+# 一键脚本
+
+一次配置，永久服务。分两套：**本地 Windows** 与 **远程 VPS（Linux）**。
+
+```
+scripts/
+├── windows/                 # 本机一键管理（双击 .bat 即可）
+│   ├── install.bat          # 安装：venv + 依赖 + 扩展构建 + 生成 .env
+│   ├── start.bat            # 启动后端（后台常驻）
+│   ├── stop.bat             # 停止
+│   ├── restart.bat          # 重启
+│   ├── status.bat           # 状态与健康检查
+│   ├── autostart.bat        # 登录即自动启动（一次性配置）
+│   ├── uninstall.bat        # 卸载（保留数据；-Purge 全删）
+│   └── akc.ps1              # 上面所有命令的实现（也可命令行调用）
+└── linux/                   # VPS 常驻服务
+    ├── install.sh           # 安装为 systemd 服务（开机自启 + 崩溃自动拉起）
+    ├── uninstall.sh         # 卸载服务
+    ├── deploy.sh            # 从本机同步代码到 VPS 并重启
+    └── akc.service          # systemd 单元模板
+```
+
+> Windows 脚本统一为 UTF-8 **带 BOM** 编码——PowerShell 5.1 读取无 BOM 的 UTF-8 会按 GBK 解码，
+> 中文注释会变成乱码并破坏语法。修改 `akc.ps1` 后请保持 BOM。
+
+---
+
+## Windows 本机
+
+**双击即可**（推荐）：
+
+1. 双击 `scripts\windows\install.bat` —— 装依赖、构建扩展、生成 `.env`
+2. 填 `apps\backend\.env`（`AKC_VAULT_PATH`、Claude 相关）
+3. 双击 `start.bat`
+4. 双击 `autostart.bat` —— **以后开机登录就自动跑起来了**，不用再管
+
+命令行等价用法：
+
+```powershell
+cd scripts\windows
+.\akc.ps1 install      # 幂等，可重复执行
+.\akc.ps1 start
+.\akc.ps1 status       # 看运行状态、版本、Vault 是否配置
+.\akc.ps1 autostart    # 注册计划任务（登录时启动）
+.\akc.ps1 autostart -Off
+.\akc.ps1 uninstall            # 保留数据与 .env
+.\akc.ps1 uninstall -Purge     # 连数据库和配置一起删
+```
+
+说明：
+
+- `install` 不会覆盖已有的 `.env` 与数据库；
+- `autostart` 用「计划任务（登录时触发）」实现，不需要管理员权限，也不需要 NSSM；
+- 首次启动会在 `apps\backend\data\auth_token` 生成本地令牌，扩展必须填它。
+
+---
+
+## 远程 VPS（Linux）
+
+在 VPS 上（Ubuntu/Debian，需 root）：
+
+```bash
+sudo ./install.sh                                  # 装到 /opt/akc，systemd 常驻
+sudo ./install.sh --vault /opt/akc/vault           # 指定 Vault 目录
+sudo ./install.sh --domain akc.example.com         # 额外装 Caddy 自动 HTTPS
+sudo ./install.sh --dir /srv/akc --user akc        # 自定义目录与用户
+```
+
+安装完即为「一次配置、永久服务」：
+
+- `systemctl enable --now akc` → 开机自启
+- `Restart=always` → 崩溃/异常退出 5 秒后自动拉起
+- `journalctl -u akc -f` → 实时日志
+- 配置在 `/etc/akc/akc.env`（权限 600，含随机生成的访问令牌）
+
+卸载：
+
+```bash
+sudo ./uninstall.sh            # 只停服务（保留数据）
+sudo ./uninstall.sh --purge    # 连目录与配置一起删
+```
+
+从本机更新代码（改完代码一条命令生效）：
+
+```bash
+./deploy.sh user@1.2.3.4                 # 同步 + 重启 + 健康检查
+./deploy.sh user@1.2.3.4 --dir /srv/akc
+```
+
+---
+
+## 后端在 VPS 上时，扩展怎么连？（重要）
+
+AKC 是 local-first 设计：扩展默认访问 `http://127.0.0.1:38127`。
+后端搬到 VPS 后有两种接法，**推荐第一种**：
+
+### 方案 1：SSH 隧道（推荐，零改动）
+
+```bash
+ssh -N -L 38127:127.0.0.1:38127 user@your-vps
+```
+
+本地 `127.0.0.1:38127` 会被转发到 VPS，扩展的 Options **完全不用改**，
+流量走 SSH 加密，VPS 上的服务仍然只监听回环地址 —— 最安全、最省事。
+
+Windows 上可以用 `autossh`，或把这条命令加进上面的 `autostart.bat` 之前。
+
+### 方案 2：HTTPS 域名
+
+用 `install.sh --domain akc.example.com` 装 Caddy 自动签发证书，然后：
+
+1. 扩展 Options 里后端地址改成 `https://akc.example.com`
+2. VPS 上改 `/etc/akc/akc.env` 的 `AKC_CORS_ORIGINS=chrome-extension://<你的扩展ID>`
+3. `systemctl restart akc`
+
+> **不要**把 `AKC_HOST` 改成 `0.0.0.0`：生产模式下配置校验会直接拒绝非回环监听，
+> 这是为了防止本地服务被裸奔到公网。对外一律走反向代理或 SSH 隧道。
+
+### Vault 同步提醒
+
+Vault 在 VPS 上时，本机 Obsidian 看不到文件。可选：
+- 用 **Obsidian Git 插件**定时 commit/push；
+- 用 **Syncthing** 双向同步；
+- 或者干脆只在 VPS 上生成知识，再定期把 `03_Knowledge/` 拉回本机。
+
+---
+
+## 常见问题
+
+## 附：网络受限时的推送工具
+
+`github.com` 不通但 `api.github.com` 通时（常见于国内网络），`git push` 会超时。
+可用 `tools/push_via_api.py` 走 REST API 推送，提交信息与目录结构完整保留：
+
+```bash
+BASE=$(git ls-remote https://github.com/huigezhi/AI_Knowledge_Compiler.git main | cut -f1)
+python scripts/tools/push_via_api.py <your_token> "$BASE" <commit_sha1> [<commit_sha2> ...]
+```
+
+## 常见问题
+
+| 现象 | 处理 |
+| --- | --- |
+| `install.bat` 报找不到 python | 安装 Python 3.12+ 并勾选 "Add to PATH" |
+| pip 安装很慢/失败 | 脚本用官方源；可改 `akc.ps1` 里的 `-i https://pypi.org/simple` 为国内镜像 |
+| 双击 bat 一闪而过 | 直接命令行运行 `powershell -File akc.ps1 start` 看报错 |
+| VPS 上 `systemctl status akc` 失败 | `journalctl -u akc -n 50` 看日志，多半是 `.env` 里 Claude 配置不完整 |
+| 想换端口 | 改 `/etc/akc/akc.env` 的 `AKC_PORT` 后 `systemctl restart akc` |
