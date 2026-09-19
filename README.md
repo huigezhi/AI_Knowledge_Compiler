@@ -121,8 +121,11 @@ npm run build         # 产物在 apps/extension/dist
 1. 打开 `chrome://extensions`，开启「开发者模式」
 2. 「加载已解压的扩展程序」→ 选择 `apps/extension/dist`
 3. 在扩展 Options 页填写后端地址与本地 token（点击「测试连接」验证）
-4. Vault 路径 / Claude API Key / 模型 ID 属于**后端配置**：复制仓库根目录 `.env.example` 为
-   `apps/backend/.env` 后填写（`AKC_VAULT_PATH`、`AKC_CLAUDE_API_KEY`、`AKC_CLAUDE_MODEL`），重启后端生效
+4. Vault 路径 / 模型 API Key / 模型 ID 属于**后端配置**，双击脚本即可填：
+   `scripts/windows/set-vault.bat` 选 Obsidian 库，`scripts/windows/set-llm.bat` 配模型服务
+   （支持 DeepSeek / Claude / 自建端点，会实测 Key 可用性）。
+   手写则是复制 `.env.example` 为 `apps/backend/.env` 后填写
+   （`AKC_VAULT_PATH`、`AKC_LLM_API_KEY`、`AKC_LLM_MODEL`、`AKC_LLM_PROVIDER`），重启后端生效
 5. 打开任意受支持平台 → 打开 Side Panel → 「保存当前对话」
 
 ### 4.3 一键脚本（推荐：一次配置，永久服务）

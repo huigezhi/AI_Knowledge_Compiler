@@ -31,6 +31,7 @@ class ErrorCode(str, Enum):
     ADAPTER_PARSE_FAILED = "ADAPTER_PARSE_FAILED"
     CLAUDE_REQUEST_FAILED = "CLAUDE_REQUEST_FAILED"
     CLAUDE_OUTPUT_INVALID = "CLAUDE_OUTPUT_INVALID"
+    LLM_DISABLED = "LLM_DISABLED"
     OBSIDIAN_WRITE_FAILED = "OBSIDIAN_WRITE_FAILED"
     OBSIDIAN_VAULT_NOT_CONFIGURED = "OBSIDIAN_VAULT_NOT_CONFIGURED"
     JOB_NOT_RUNNABLE = "JOB_NOT_RUNNABLE"
@@ -108,11 +109,27 @@ class AdapterParseError(AppError):
 
 
 class ClaudeRequestError(AppError):
-    """外部 AI API 调用失败。网络/限流类错误可重试。"""
+    """外部 AI API 调用失败。网络/限流类错误可重试。
+
+    注意：错误码保留 ``CLAUDE_*`` 旧名（属对外契约，扩展侧已按此映射），
+    但语义是「Anthropic Messages 兼容的 LLM 服务」，可由配置切到 DeepSeek 等端点。
+    """
 
     code = ErrorCode.CLAUDE_REQUEST_FAILED
     http_status = status.HTTP_502_BAD_GATEWAY
     retryable = True
+
+
+class LLMDisabledError(AppError):
+    """编译未启用（AKC_LLM_ENABLED 为 false）。
+
+    单独一个错误码，是为了让前端能给出**「这不是故障、只是没配」**的准确提示 ——
+    采集原始对话本来就不需要 LLM。
+    """
+
+    code = ErrorCode.LLM_DISABLED
+    http_status = status.HTTP_400_BAD_REQUEST
+    retryable = False
 
 
 class ClaudeOutputInvalidError(AppError):

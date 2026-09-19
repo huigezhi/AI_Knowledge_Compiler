@@ -116,14 +116,25 @@ E:\workbuddy_files\AI_Knowledge_Compiler\scripts\windows\set-vault.bat
 
 连接是否成功，可以在扩展的**选项页**直接看到（有一行「Obsidian 知识库：已连接 …」）。
 
-**第二步（可选）：配置 Claude 才能让 AI 提炼知识**
+**第二步（可选）：配一个模型服务，AI 才会提炼知识**
 
-编辑 `apps\backend\.env`（记事本打开）：
+**推荐用 DeepSeek**——国内直连、便宜，而且官方就提供 Claude 同款的接口协议，我们不用改代码就能接。
+
+双击：
+```
+E:\workbuddy_files\AI_Knowledge_Compiler\scripts\windows\set-llm.bat
+```
+
+选 `1) DeepSeek` → 粘贴你的 Key（没有的话去 https://platform.deepseek.com/api_keys 申请）→ 回车。
+它会**先发一个极小的请求实测这个 Key 能不能用**，通过后才写入配置并重启后端。
+
+也可以手改 `apps\backend\.env`（记事本打开）：
 
 ```env
-AKC_CLAUDE_ENABLED=true                    # 想用 AI 编译就写 true
-AKC_CLAUDE_MODEL=claude-sonnet-4-5         # 模型名
-AKC_CLAUDE_API_KEY=sk-ant-xxxx             # 你的 Claude 密钥
+AKC_LLM_ENABLED=true                       # 想用 AI 编译就写 true
+AKC_LLM_PROVIDER=deepseek                  # 决定接口地址；写 anthropic 就是 Claude
+AKC_LLM_MODEL=deepseek-chat                # 模型名
+AKC_LLM_API_KEY=sk-xxxx                    # 你的密钥
 ```
 
 改完**重启后端**（双击 `stop.bat` 再 `start.bat`，或 `start-foreground.bat`）。

@@ -42,13 +42,25 @@ curl http://127.0.0.1:38127/api/v1/health
 它会列出你电脑上已安装的 Obsidian 库让你选择（也支持拖拽文件夹或粘贴路径），
 自动写入并把后端重启好。
 
-其余配置（Claude 等）复制 `.env.example` 为 `apps/backend/.env`，按需填写：
+配置 AI 编译用的模型服务**不用手改配置**：双击 `scripts/windows/set-llm.bat`，
+选 provider（DeepSeek / Claude / 自建端点）、粘贴 API Key，它会**先发一个极小请求
+实测 Key 是否可用**，再写入并重启后端。等价的命令行用法：
+
+```bash
+akc.ps1 set-llm -Provider deepseek -ApiKey sk-xxx -Model deepseek-chat
+akc.ps1 set-llm -Clear            # 关闭 AI 编译（只存档，不提炼）
+```
+
+也可以手改 `apps/backend/.env`（从 `.env.example` 复制）：
 
 ```env
-AKC_CLAUDE_ENABLED=true                        # 想编译就设为 true
-AKC_CLAUDE_MODEL=<你的模型 ID>                  # 例如 claude-sonnet-4-5
-AKC_CLAUDE_API_KEY=sk-ant-...                  # 绝对不要提交到 Git
+AKC_LLM_ENABLED=true                           # 想编译就设为 true
+AKC_LLM_PROVIDER=deepseek                      # anthropic | deepseek | custom
+AKC_LLM_MODEL=<你的模型 ID>                     # 例如 deepseek-chat
+AKC_LLM_API_KEY=sk-...                         # 绝对不要提交到 Git
 ```
+
+> `AKC_CLAUDE_*` 是旧版键名，仍然被识别（会自动并入 `AKC_LLM_*`），但新配置请用上面的名字。
 
 改完**重启服务**生效。检查：
 
@@ -203,9 +215,9 @@ make test            # 全量测试
 
 | 想做的事 | 操作 |
 | --- | --- |
-| 只存档对话，不调用 Claude | 不配 `AKC_CLAUDE_ENABLED`，只用「保存当前」 |
-| 换 Vault | 改 `.env` 的 `AKC_VAULT_PATH`，重启服务 |
-| 换模型 | 改 `.env` 的 `AKC_CLAUDE_MODEL`，重启服务 |
+| 只存档对话，不调用模型 | 不配 `AKC_LLM_ENABLED`（或 `set-llm -Clear`），只用「保存当前」 |
+| 换 Vault | 双击 `set-vault.bat`（或改 `.env` 的 `AKC_VAULT_PATH`），重启服务 |
+| 换模型 / 换服务商 | 双击 `set-llm.bat`（或改 `.env` 的 `AKC_LLM_MODEL`），重启服务 |
 | 导出一条对话 | `GET /api/v1/conversations/{id}/export?fmt=markdown\|json` |
 | 关键词检索知识 | `GET /api/v1/knowledge/search?q=索引` |
 | 看任务为什么失败 | `GET /api/v1/jobs?status=failed` 里的 `error_code` |

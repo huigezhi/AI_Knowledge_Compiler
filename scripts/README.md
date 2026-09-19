@@ -12,6 +12,7 @@ scripts/
 │   ├── restart.bat          # 重启
 │   ├── status.bat           # 状态与健康检查
 │   ├── set-vault.bat        # 连接 Obsidian 库（自动识别已安装的库）
+│   ├── set-llm.bat          # 配置 AI 编译用的模型服务（DeepSeek/Claude/自建，实测 Key）
 │   ├── autostart.bat        # 登录即自动启动（一次性配置）
 │   ├── build-extension.bat  # 改完适配器后重建扩展
 │   ├── uninstall.bat        # 卸载（保留数据；-Purge 全删）
@@ -165,7 +166,10 @@ Windows 上可以用 `autossh`，或把这条命令加进上面的 `autostart.ba
 本机 Obsidian 需要靠 Git / Syncthing 同步。
 
 如果只是想要 Claude API 可达，又不想让数据出本机，更稳妥的组合是：
-**后端留在本机 + 给编译请求单独配代理**（`AKC_CLAUDE_BASE_URL` 指向你的代理网关）。
+**后端留在本机 + 给编译请求单独配代理**（`AKC_LLM_BASE_URL` 指向你的代理网关）。
+
+另外也可以干脆换一家国内直连的服务商：`set-llm.bat` 里选 DeepSeek 即可，
+不需要任何代理。
 
 ### Vault 同步提醒
 

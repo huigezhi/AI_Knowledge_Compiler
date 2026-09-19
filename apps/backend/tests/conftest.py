@@ -15,6 +15,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 # 环境变量必须在导入 akc.config 之前设定，否则 Settings 校验会失败。
+# 测试不得读取开发者本机的 .env：否则本机真实配置（如已连接的 Obsidian 库）
+# 会污染断言，导致「未配置 Vault」之类的用例莫名失败。
+os.environ["AKC_ENV_FILE"] = ""
 os.environ.setdefault("AKC_ENV", "test")
 os.environ.setdefault("AKC_DATA_DIR", str(Path(tempfile.mkdtemp(prefix="akc-conftest-"))))
 os.environ.setdefault(

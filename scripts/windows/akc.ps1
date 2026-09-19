@@ -7,6 +7,7 @@
     所有操作都围绕同一个入口，幂等可重复执行：
       install    创建虚拟环境、装依赖、构建扩展、生成 .env
       set-vault  连接你的 Obsidian 库（自动识别已安装的库，写入 .env 并重启）
+      set-llm    配置 AI 编译用的模型服务（DeepSeek / Claude / 自建端点），会实测 Key 是否可用
       start      后台启动后端（已运行则跳过）
       stop       停止后端
       restart    重启
@@ -22,7 +23,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("install", "start", "stop", "restart", "status", "autostart", "set-vault", "uninstall", "open")]
+    [ValidateSet("install", "start", "stop", "restart", "status", "autostart", "set-vault", "set-llm", "uninstall", "open")]
     [string]$Command = "status",
 
     [switch]$Off,      # autostart -Off 取消自启；install 时跳过构建扩展用 -SkipExtension
@@ -30,7 +31,12 @@ param(
     [switch]$SkipExtension,
     [switch]$AsTask,   # autostart -AsTask 额外注册计划任务（需要管理员权限）
     [string]$VaultPath, # set-vault -VaultPath "D:\MyVault" 直接指定库路径（不给则交互选择）
-    [switch]$Clear      # set-vault -Clear 清除库路径配置
+    [switch]$Clear,     # set-vault -Clear 清除库路径配置
+    [string]$Provider,  # set-llm -Provider deepseek|anthropic|custom
+    [string]$ApiKey,    # set-llm -ApiKey sk-xxx
+    [string]$Model,     # set-llm -Model deepseek-chat
+    [string]$BaseUrl,   # set-llm -BaseUrl http://localhost:11434（custom 必填，脚本化调用用）
+    [switch]$NoRestart  # set-llm -NoRestart 只写配置，不重启后端
 )
 
 $ErrorActionPreference = "Stop"
@@ -265,6 +271,173 @@ function Set-EnvValue([string]$key, [string]$value) {
     [System.IO.File]::WriteAllLines($envFile, $out, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Remove-EnvKey([string]$key) {
+    $envFile = Join-Path $Backend ".env"
+    if (-not (Test-Path $envFile)) { return }
+    $lines = @(Get-Content $envFile -Encoding UTF8)
+    $out = foreach ($line in $lines) {
+        if ($line -match "^\s*$([regex]::Escape($key))\s*=") { continue }
+        $line
+    }
+    [System.IO.File]::WriteAllLines($envFile, $out, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# 各 provider 的默认模型与申请地址（只是默认值，用户可改）
+$LLM_PRESETS = @(
+    @{ Name = "deepseek"; Label = "DeepSeek（国内直连，便宜）"; BaseUrl = "https://api.deepseek.com/anthropic"; Model = "deepseek-chat"; Home = "https://platform.deepseek.com/api_keys" },
+    @{ Name = "anthropic"; Label = "Claude / Anthropic";           BaseUrl = "https://api.anthropic.com";             Model = "claude-sonnet-4-5"; Home = "https://console.anthropic.com/settings/keys" },
+    @{ Name = "custom";    Label = "自建 / 其他兼容端点";           BaseUrl = "";                                      Model = "";                  Home = "" }
+)
+
+<#
+    实测 API Key 是否可用：发一个极小的请求（max_tokens=16）。
+    返回 @{ Ok=$bool; Detail=$string }。
+    两条路径都走 Anthropic 兼容协议（DeepSeek 官方提供的就是 /anthropic/v1/messages）。
+#>
+function Test-LlmKey([string]$baseUrl, [string]$apiKey, [string]$model) {
+    $url = $baseUrl.TrimEnd('/') + "/v1/messages"
+    $body = @{
+        model      = $model
+        max_tokens = 16
+        messages   = @(@{ role = "user"; content = "ping" })
+    } | ConvertTo-Json -Depth 5
+
+    try {
+        $resp = Invoke-WebRequest -Uri $url -Method POST -UseBasicParsing `
+            -Headers @{ "x-api-key" = $apiKey; "anthropic-version" = "2023-06-01"; "content-type" = "application/json" } `
+            -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 30
+        return @{ Ok = $true; Detail = "HTTP 200：$($resp.Content.Substring(0, [Math]::Min(120, $resp.Content.Length)))" }
+    } catch {
+        $code = $null; $text = ""
+        if ($_.Exception.Response) {
+            $code = [int]$_.Exception.Response.StatusCode
+            try {
+                $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                $text = $reader.ReadToEnd()
+            } catch { $text = "" }
+        }
+        $msg = $_.Exception.Message
+        switch ($code) {
+            401 { return @{ Ok = $false; Detail = "HTTP 401 —— API Key 无效或已过期，请重新复制一个" } }
+            403 { return @{ Ok = $false; Detail = "HTTP 403 —— Key 没有权限访问该模型" } }
+            404 { return @{ Ok = $false; Detail = "HTTP 404 —— 端点或模型不存在，检查模型 ID 与 base_url" } }
+            429 { return @{ Ok = $false; Detail = "HTTP 429 —— 触发限流（Key 本身是好的），稍后再试" } }
+            default { return @{ Ok = $false; Detail = "HTTP $code —— $msg $text".Trim() } }
+        }
+    }
+}
+
+function Invoke-SetLlm {
+    # 关闭 AI 编译
+    if ($Clear -or $Off) {
+        Set-EnvValue "AKC_LLM_ENABLED" "false"
+        Remove-EnvKey "AKC_CLAUDE_ENABLED"
+        Write-Ok "已关闭 AI 编译（只保存原始对话，不生成知识笔记）"
+        if (-not $NoRestart) {
+            try { Invoke-Stop; Invoke-Start } catch { Write-Warn "后端重启未成功：$($_.Exception.Message.Trim())；稍后双击 start.bat 生效" }
+        }
+        return
+    }
+
+    $preset = $null
+
+    if ($Provider) {
+        $preset = $LLM_PRESETS | Where-Object { $_.Name -eq $Provider.Trim().ToLower() } | Select-Object -First 1
+        if (-not $preset) { throw "未知 provider：$Provider（可用：deepseek / anthropic / custom）" }
+    } else {
+        Write-Host "     用哪个模型服务来提炼知识？"
+        for ($i = 0; $i -lt $LLM_PRESETS.Count; $i++) {
+            Write-Host ("       {0}) {1}" -f ($i + 1), $LLM_PRESETS[$i].Label)
+        }
+        $ans = Read-Host "     序号（直接回车=1，即 DeepSeek）"
+        if (-not $ans) { $ans = "1" }
+        if ($ans -match '^\d+$' -and [int]$ans -ge 1 -and [int]$ans -le $LLM_PRESETS.Count) {
+            $preset = $LLM_PRESETS[[int]$ans - 1]
+        } else {
+            throw "无效选择：$ans"
+        }
+    }
+
+    # base_url：custom 必须给出（-BaseUrl 或交互输入）
+    $baseUrl = if ($BaseUrl) { $BaseUrl.Trim().Trim('"') } else { $preset.BaseUrl }
+    if (-not $baseUrl) {
+        $baseUrl = Read-Host "     端点地址 base_url（例如 http://localhost:11434）"
+        $baseUrl = $baseUrl.Trim().Trim('"')
+        if (-not $baseUrl) { throw "custom 端点必须提供 base_url（-BaseUrl）" }
+    }
+
+    # 模型：给默认值，可直接回车
+    if ($Model) { $model = $Model } else {
+        $model = Read-Host "     模型 ID（直接回车用 $($preset.Model)）"
+        if (-not $model) { $model = $preset.Model }
+    }
+    $model = $model.Trim().Trim('"')
+    if (-not $model) { throw "自定义端点没有默认模型，必须填写模型 ID" }
+
+    # API Key
+    if ($ApiKey) { $key = $ApiKey } else {
+        if ($preset.Home) { Write-Host "     没有 Key？在这里申请：$($preset.Home)" }
+        $key = Read-Host "     API Key" -AsSecureString
+        $key = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+                   [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($key))
+    }
+    $key = $key.Trim().Trim('"')
+    if (-not $key) { throw "API Key 不能为空" }
+
+    # 写入前先实测，避免把不可用的 Key 写进配置后无从判断
+    Write-Step "正在实测这个 Key（发一个 16 token 的请求）..."
+    $probe = Test-LlmKey -baseUrl $baseUrl -apiKey $key -model $model
+    if ($probe.Ok) {
+        Write-Ok "Key 可用"
+    } else {
+        Write-Warn "实测未通过：$($probe.Detail)"
+        $go = Read-Host "     仍然写入配置？(y/N)"
+        if ($go -notmatch '^[Yy]$') { Write-Warn "已取消，配置未改动"; return }
+    }
+
+    Write-Step "写入配置 apps\backend\.env"
+    Set-EnvValue "AKC_LLM_ENABLED"  "true"
+    Set-EnvValue "AKC_LLM_PROVIDER" $preset.Name
+    Set-EnvValue "AKC_LLM_MODEL"    $model
+    Set-EnvValue "AKC_LLM_API_KEY"  $key
+    if ($preset.Name -eq "custom") {
+        Set-EnvValue "AKC_LLM_BASE_URL" $baseUrl
+    } else {
+        # 非 custom：让 provider 预设生效，避免残留的旧 base_url 把请求发到别处
+        Remove-EnvKey "AKC_LLM_BASE_URL"
+    }
+
+    # 清掉旧版 AKC_CLAUDE_* 键：新键已完全覆盖，留着只会让人误以为还在用 Claude
+    foreach ($legacy in @("AKC_CLAUDE_ENABLED", "AKC_CLAUDE_MODEL", "AKC_CLAUDE_API_KEY", "AKC_CLAUDE_BASE_URL")) {
+        Remove-EnvKey $legacy
+    }
+
+    Write-Ok "provider = $($preset.Name)，model = $model"
+    Write-Host "     endpoint = $baseUrl"
+
+    if (-not $NoRestart) {
+        try {
+            Invoke-Stop
+            Invoke-Start
+        } catch {
+            Write-Warn "后端重启未成功：$($_.Exception.Message.Trim())"
+            Write-Host "     配置已写入，稍后双击 start.bat 即可生效"
+        }
+    }
+
+    try {
+        $st = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/v1/settings" -TimeoutSec 5
+        if ($st.llm_enabled) {
+            Write-Ok "后端已启用 AI 编译：provider=$($st.llm_provider) model=$($st.llm_model)"
+            Write-Host "     现在在扩展里点「保存 + 编译」，就会生成 03_Knowledge 下的知识笔记。"
+        } else {
+            Write-Warn "配置已写入，但后端仍报告未启用：$($st | ConvertTo-Json -Compress)"
+        }
+    } catch {
+        Write-Warn "无法确认状态（$($_.Exception.Message.Trim())），请手动访问 http://127.0.0.1:$Port/api/v1/settings"
+    }
+}
+
 function Invoke-SetVault {
     # 清除配置
     if ($Clear) {
@@ -444,6 +617,7 @@ switch ($Command) {
     "status"     { Invoke-Status }
     "autostart"  { Invoke-Autostart }
     "set-vault"  { Invoke-SetVault }
+    "set-llm"    { Invoke-SetLlm }
     "uninstall"  { Invoke-Uninstall }
     "open"       { Start-Process "http://127.0.0.1:$Port/api/v1/health" }
 }

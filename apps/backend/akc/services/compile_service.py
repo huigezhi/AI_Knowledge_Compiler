@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from akc.compiler.client import ClaudeClient, ClaudeSettings
 from akc.compiler.extractor import run_extraction
 from akc.config import COMPILER_VERSION, Settings
-from akc.errors import AppError, ClaudeRequestError
+from akc.errors import AppError, ClaudeRequestError, LLMDisabledError
 from akc.logging_setup import log_event
 from akc.repositories import (
     audit,
@@ -40,18 +40,16 @@ def _new_id(prefix: str) -> str:
 
 
 def _claude_client(settings: Settings) -> ClaudeClient:
-    if not settings.claude_enabled:
-        raise ClaudeRequestError(
-            "claude compiler is disabled; enable it in settings first",
-            retryable=False,
-        )
+    if not settings.llm_enabled:
+        # 采集原始对话不需要 LLM；只有「编译成知识」才需要。
+        raise LLMDisabledError("llm compiler is disabled (set AKC_LLM_ENABLED=true to enable)")
     return ClaudeClient(
         ClaudeSettings(
-            api_key=settings.claude_api_key or "",
-            model=settings.claude_model or "",
-            base_url=settings.claude_base_url,
-            timeout_seconds=settings.claude_timeout_seconds,
-            max_context_tokens=settings.claude_max_context_tokens,
+            api_key=settings.llm_api_key or "",
+            model=settings.llm_model or "",
+            base_url=settings.llm_base_url,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_context_tokens=settings.llm_max_context_tokens,
         )
     )
 
@@ -100,7 +98,7 @@ def compile_conversation(
         session,
         run_id=_new_id("crun"),
         conversation_id=conversation_id,
-        model=settings.claude_model or "",
+        model=settings.llm_model or "",
         prompt_version="extractor-v1",
         compiler_version=COMPILER_VERSION,
         adapter_version=conv_row.adapter_version,
@@ -112,7 +110,7 @@ def compile_conversation(
             client,
             conversation,
             pool,
-            max_chars=settings.claude_max_context_tokens * 4,
+            max_chars=settings.llm_max_context_tokens * 4,
         )
     except Exception as exc:  # noqa: BLE001 - 统一记录后向上抛，由 job 层决定重试
         run_repo.finish_compile_run(session, run, status="failed", error=str(exc)[:500])
@@ -169,7 +167,7 @@ def compile_conversation(
                 entities=list(item.get("entities") or []),
                 status=status,
                 prompt_version="extractor-v1",
-                model=settings.claude_model,
+                model=settings.llm_model,
             )
             kn_repo.link_sources(
                 session,
@@ -238,7 +236,7 @@ def compile_conversation(
                 entities=list(item.get("entities") or []),
                 status="review",
                 prompt_version="extractor-v1",
-                model=settings.claude_model,
+                model=settings.llm_model,
             )
             kn_repo.link_sources(
                 session,
@@ -276,7 +274,7 @@ def compile_conversation(
         result={
             "stats": stats,
             "decisions": decisions,
-            "model": settings.claude_model,
+            "model": settings.llm_model,
             "prompt_version": "extractor-v1",
         },
     )
@@ -286,7 +284,7 @@ def compile_conversation(
         event_type="conversation.compiled",
         entity_type="conversation",
         entity_id=conversation_id,
-        detail={"stats": stats, "model": settings.claude_model},
+        detail={"stats": stats, "model": settings.llm_model},
     )
     session.commit()
     log_event("conversation_compiled", conversation_id=conversation_id, **stats)

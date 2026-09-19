@@ -12,6 +12,11 @@ from akc.db.models import Setting
 # 允许通过 API 持久化的设置键（其余一律视为只读，避免写入内部状态）。
 WRITABLE_KEYS = {
     "backend_url",
+    "llm_enabled",
+    "llm_provider",
+    "llm_model",
+    "llm_max_context_tokens",
+    # 兼容旧键名
     "claude_enabled",
     "claude_model",
     "claude_max_context_tokens",

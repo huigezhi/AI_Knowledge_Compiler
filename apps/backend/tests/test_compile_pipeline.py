@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 from akc.compiler.client import ClaudeClient, ClaudeSettings
 from akc.compiler.extractor import run_extraction
 from akc.compiler.validator import validate_compiler_output
-from akc.errors import ClaudeOutputInvalidError, ClaudeRequestError
+from akc.errors import (
+    ClaudeOutputInvalidError,
+    ClaudeRequestError,
+    ErrorCode,
+    LLMDisabledError,
+)
 from akc.config import Settings
 from akc.services.compile_service import compile_conversation
 
@@ -135,9 +140,9 @@ def test_full_compile_pipeline(session: Session, settings: Settings) -> None:
         settings=settings,
     )
 
-    settings.claude_enabled = True
-    settings.claude_api_key = "test-key"
-    settings.claude_model = "configured-model"
+    settings.llm_enabled = True
+    settings.llm_api_key = "test-key"
+    settings.llm_model = "configured-model"
 
     import akc.services.compile_service as compile_service
 
@@ -175,7 +180,9 @@ def test_compile_requires_enabled_compiler(session: Session, settings: Settings)
         },
         settings=settings,
     )
-    settings.claude_enabled = False
-    with pytest.raises(ClaudeRequestError) as exc:
+    settings.llm_enabled = False
+    with pytest.raises(LLMDisabledError) as exc:
         compile_conversation(session, imported["conversation_id"], settings=settings)
     assert exc.value.retryable is False
+    # 单独的错误码：让前端能区分「没配 LLM」与「调用失败」
+    assert exc.value.code == ErrorCode.LLM_DISABLED

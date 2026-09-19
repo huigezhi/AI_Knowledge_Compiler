@@ -19,6 +19,12 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 # 允许读取的键 -> 从 Settings 取值的方式
 _READABLE_ENV_KEYS = (
     "backend_url",
+    "llm_enabled",
+    "llm_provider",
+    "llm_model",
+    "llm_base_url",
+    "llm_max_context_tokens",
+    # 兼容旧键名（与上面等价）
     "claude_enabled",
     "claude_model",
     "claude_max_context_tokens",
@@ -38,6 +44,12 @@ def get_settings(session: SessionDep, settings: SettingsDep) -> dict[str, Any]:
     overrides = settings_repo.get_all(session)
     values: dict[str, Any] = {
         "backend_url": f"http://{settings.host}:{settings.port}",
+        "llm_enabled": settings.llm_enabled,
+        "llm_provider": settings.llm_provider,
+        "llm_model": settings.llm_model,
+        "llm_base_url": settings.llm_base_url,
+        "llm_max_context_tokens": settings.llm_max_context_tokens,
+        # 旧键名保留（值相同），避免既有前端/脚本失效
         "claude_enabled": settings.claude_enabled,
         "claude_model": settings.claude_model,
         "claude_max_context_tokens": settings.claude_max_context_tokens,
@@ -55,7 +67,8 @@ def get_settings(session: SessionDep, settings: SettingsDep) -> dict[str, Any]:
             values[key] = (stored or {}).get("value", values[key])
     return {
         "values": values,
-        "claude_api_key_configured": bool(settings.claude_api_key),
+        "llm_api_key_configured": bool(settings.llm_api_key),
+        "claude_api_key_configured": bool(settings.llm_api_key),
         "readable_keys": list(_READABLE_ENV_KEYS),
         "writable_keys": sorted(settings_repo.WRITABLE_KEYS),
         "env": settings.env,

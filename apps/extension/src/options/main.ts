@@ -87,6 +87,27 @@ async function refreshVaultStatus(): Promise<void> {
   }
 }
 
+/** 展示 AI 编译所用模型服务的状态（Key/模型同样在后端 .env，不在此页）。 */
+async function refreshLlmStatus(): Promise<void> {
+  const node = el("llm-status");
+  try {
+    const s = await currentClient().llmStatus();
+    if (s.llm_enabled && s.llm_model) {
+      node.textContent = `已启用：${s.llm_provider ?? "unknown"} / ${s.llm_model}`;
+      node.style.color = "#7ee787";
+    } else {
+      node.textContent =
+        "未配置 —— 只会保存原始对话，不会生成知识笔记。双击 scripts\\windows\\set-llm.bat 配置（支持 DeepSeek）。";
+      node.style.color = "#ffb86b";
+    }
+  } catch (error) {
+    node.textContent = `无法检查（后端未连接？）：${
+      error instanceof OfflineError ? error.message : String(error)
+    }`;
+    node.style.color = "#ff8080";
+  }
+}
+
 async function testConnection(): Promise<void> {
   setStatus("正在连接…");
   const patch = collect();
@@ -104,6 +125,7 @@ async function testConnection(): Promise<void> {
     setStatus(message, false);
   }
   await refreshVaultStatus();
+  await refreshLlmStatus();
 }
 
 async function boot(): Promise<void> {
@@ -111,6 +133,7 @@ async function boot(): Promise<void> {
   el("btn-test").addEventListener("click", () => void testConnection());
   el("btn-save").addEventListener("click", () => void saveAll());
   await refreshVaultStatus();
+  await refreshLlmStatus();
 }
 
 void boot();

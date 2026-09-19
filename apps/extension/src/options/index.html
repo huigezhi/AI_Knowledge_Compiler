@@ -69,6 +69,17 @@
     </fieldset>
 
     <fieldset>
+      <legend>AI 编译（提炼知识用）</legend>
+      <div id="llm-status">正在检查…</div>
+      <p class="hint">
+        模型服务同样由<strong>后端</strong>配置（不在本设置页）。配置方法：双击
+        <code>scripts\windows\set-llm.bat</code>，选 DeepSeek / Claude / 自建端点，
+        粘贴 API Key，它会先实测 Key 再写入并重启后端。关闭编译用
+        <code>akc.ps1 set-llm -Clear</code>。
+      </p>
+    </fieldset>
+
+    <fieldset>
       <legend>采集策略</legend>
       <label for="batch-size">批量同步单次上限</label>
       <input id="batch-size" type="number" min="1" max="200" />

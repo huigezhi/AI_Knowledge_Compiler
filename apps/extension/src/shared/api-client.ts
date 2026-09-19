@@ -48,6 +48,19 @@ export class ApiError extends Error {
     if (this.payload?.code === "SCHEMA_VALIDATION_FAILED") {
       return "采集结果不符合数据规范，可能是平台页面结构变化，请更新适配器后再试。";
     }
+    if (
+      this.payload?.code === "CLAUDE_DISABLED" ||
+      this.payload?.code === "COMPILER_DISABLED"
+    ) {
+      // 「AI 编译」不是必须的：默认只保存原始对话。要生成知识笔记才需要配 LLM。
+      return "还没启用 AI 编译。保存原始对话不需要它；若要提炼知识，请在 apps\\backend\\.env 里配置 AKC_LLM_*（支持 Anthropic 或 DeepSeek 的 Anthropic 兼容端点）后重启后端。";
+    }
+    if (this.payload?.code === "CLAUDE_REQUEST_FAILED") {
+      return "调用 AI 编译服务失败（网络/鉴权/限流）。请检查 .env 里的 AKC_LLM_BASE_URL、AKC_LLM_API_KEY 与 AKC_LLM_MODEL，并确认网络可达。";
+    }
+    if (this.payload?.code === "CLAUDE_OUTPUT_INVALID") {
+      return "AI 返回的内容不是合法 JSON，已丢弃本次结果（不会写入脏数据）。可重试或换用更强的模型。";
+    }
     if (this.payload?.code === "NOT_FOUND") {
       return "找不到对应记录，它可能已被删除。";
     }
@@ -198,6 +211,26 @@ export class AkcApiClient {
       knowledge_folder: string;
       inbox_folder: string;
     }>("/obsidian/status");
+  }
+
+  /** 后端侧的模型服务配置（LLM_*；旧版 CLAUDE_* 值相同，这里只读新键）。 */
+  llmStatus() {
+    return this.request<{
+      llm_enabled: boolean;
+      llm_provider: string | null;
+      llm_model: string | null;
+      llm_api_key_configured: boolean;
+    }>("/settings").then((raw) => {
+      const values = (raw as { values?: Record<string, unknown> }).values ?? {};
+      return {
+        llm_enabled: Boolean(values.llm_enabled ?? false),
+        llm_provider: (values.llm_provider as string | null) ?? null,
+        llm_model: (values.llm_model as string | null) ?? null,
+        llm_api_key_configured: Boolean(
+          (raw as { llm_api_key_configured?: boolean }).llm_api_key_configured ?? false,
+        ),
+      };
+    });
   }
 
   syncObsidian(payload: { knowledge_ids?: string[]; conversation_ids?: string[] }) {

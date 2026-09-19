@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 from functools import lru_cache
 from pathlib import Path
@@ -24,13 +25,28 @@ COMPILER_VERSION = "0.1.0"
 
 _VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
+# LLM 端点预设：编译只需「Anthropic Messages 兼容」的接口即可，
+# 因此除了官方 Anthropic，也能直接接 DeepSeek 的 Anthropic 兼容端点。
+# 注意这里只预设**地址**，不预设模型名 —— 模型 ID 一律由配置注入。
+LLM_BASE_URL_PRESETS: dict[str, str] = {
+    "anthropic": "https://api.anthropic.com",
+    "deepseek": "https://api.deepseek.com/anthropic",
+    # custom 没有预设：不填 AKC_LLM_BASE_URL 就报错，避免静默打到 Anthropic
+    "custom": "",
+}
+
+# 允许用环境变量指定配置文件；空字符串表示**不读 .env 文件**（测试/CI 用）。
+_ENV_FILE = os.environ.get("AKC_ENV_FILE", ".env").strip()
+
 
 class Settings(BaseSettings):
     """运行环境配置。"""
 
     model_config = SettingsConfigDict(
         env_prefix="AKC_",
-        env_file=".env",
+        # 默认读工作目录下的 .env；可用 AKC_ENV_FILE 覆盖（设为空字符串即**不读任何 .env 文件**，
+        # 测试与 CI 靠它避免被开发者本机的真实配置污染）。
+        env_file=(_ENV_FILE or None),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -58,13 +74,23 @@ class Settings(BaseSettings):
     vault_knowledge_folder: str = "03_Knowledge"
     vault_inbox_folder: str = "02_Inbox"
 
-    # --- claude / compiler -------------------------------------------------
+    # --- LLM / compiler（provider 中立；支持 Anthropic 或任何 Anthropic 兼容端点）---
+    llm_enabled: bool = False
+    # anthropic | deepseek | custom —— 决定 base_url 预设，见 LLM_BASE_URL_PRESETS
+    llm_provider: str = "anthropic"
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None  # 未设置时按 provider 预设
+    llm_max_context_tokens: int = 50_000
+    llm_timeout_seconds: float = 120.0
+
+    # --- 兼容旧配置名（AKC_CLAUDE_*，等价于上面的 AKC_LLM_*）-----------------
     claude_enabled: bool = False
     claude_model: str | None = None
     claude_api_key: str | None = None
-    claude_base_url: str = "https://api.anthropic.com"
-    claude_max_context_tokens: int = 50_000
-    claude_timeout_seconds: float = 120.0
+    claude_base_url: str | None = None
+    claude_max_context_tokens: int | None = None
+    claude_timeout_seconds: float | None = None
 
     # --- compile policy ----------------------------------------------------
     auto_compile: bool = False
@@ -77,7 +103,17 @@ class Settings(BaseSettings):
     job_backoff_seconds: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [2, 5, 15])
 
     # ------------------------------------------------------------------ 校验
-    @field_validator("vault_path", "claude_model", "claude_api_key", "auth_token", mode="before")
+    @field_validator(
+        "vault_path",
+        "llm_model",
+        "llm_api_key",
+        "llm_base_url",
+        "claude_model",
+        "claude_api_key",
+        "claude_base_url",
+        "auth_token",
+        mode="before",
+    )
     @classmethod
     def _empty_string_is_unset(cls, value: object) -> object:
         """空值等同「未配置」。
@@ -89,6 +125,26 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def _check_llm_provider(cls, v: object) -> object:
+        """校验 provider，避免拼错后静默回落到 Anthropic 默认地址。
+
+        没有这层校验时，`AKC_LLM_PROVIDER=DeepSeek`（大小写）或 `deep-seek`
+        都会查不到预设，悄悄用默认 endpoint —— 表现为「配了 DeepSeek 却一直 401」，
+        排查成本很高。这里直接报错并列出可用值。
+        """
+        if not isinstance(v, str) or not v.strip():
+            return "anthropic"
+        name = v.strip().lower()
+        if name not in LLM_BASE_URL_PRESETS:
+            known = "、".join(sorted(LLM_BASE_URL_PRESETS))
+            raise ValueError(
+                f"AKC_LLM_PROVIDER={v!r} 不是已知 provider，可用值：{known}。"
+                "若要接自建/兼容端点，请用 custom 并显式设置 AKC_LLM_BASE_URL。"
+            )
+        return name
 
     @field_validator("log_level")
     @classmethod
@@ -122,13 +178,59 @@ class Settings(BaseSettings):
         return list(v)  # type: ignore[arg-type]
 
     @model_validator(mode="after")
+    def _merge_llm_aliases(self) -> Settings:
+        """把旧配置名（AKC_CLAUDE_*）并入新的 provider 中立配置（AKC_LLM_*）。
+
+        规则：AKC_LLM_* 优先；未设置的项回落到 AKC_CLAUDE_*，最后回落到 provider 预设。
+        合并后**同时写回两组字段**，这样旧代码/旧配置继续可用，不会因为改名而失效。
+        """
+        if self.claude_enabled:
+            self.llm_enabled = True
+        self.claude_enabled = self.llm_enabled
+
+        if self.llm_model is None:
+            self.llm_model = self.claude_model
+        self.claude_model = self.llm_model
+
+        if self.llm_api_key is None:
+            self.llm_api_key = self.claude_api_key
+        self.claude_api_key = self.llm_api_key
+
+        if self.llm_base_url is None:
+            self.llm_base_url = self.claude_base_url
+        if self.llm_base_url is None:
+            self.llm_base_url = LLM_BASE_URL_PRESETS.get(self.llm_provider, "")
+        if not self.llm_base_url:
+            # custom 没有预设地址：启用编译时必须显式给出，否则不知道该往哪发。
+            if self.llm_enabled:
+                raise ValueError(
+                    "AKC_LLM_PROVIDER=custom 时必须显式设置 AKC_LLM_BASE_URL"
+                    "（例如 http://localhost:11434）。"
+                )
+            self.llm_base_url = LLM_BASE_URL_PRESETS["anthropic"]
+        self.llm_base_url = self.llm_base_url.rstrip("/")
+        self.claude_base_url = self.llm_base_url
+
+        if self.claude_max_context_tokens:
+            self.llm_max_context_tokens = self.claude_max_context_tokens
+        self.claude_max_context_tokens = self.llm_max_context_tokens
+
+        if self.claude_timeout_seconds:
+            self.llm_timeout_seconds = self.claude_timeout_seconds
+        self.claude_timeout_seconds = self.llm_timeout_seconds
+        return self
+
+    @model_validator(mode="after")
     def _check_compiler(self) -> Settings:
-        if self.claude_enabled and not (self.claude_api_key and self.claude_model):
+        if self.llm_enabled and not (self.llm_api_key and self.llm_model):
             raise ValueError(
-                "AKC_CLAUDE_ENABLED=true requires both AKC_CLAUDE_API_KEY and AKC_CLAUDE_MODEL"
+                "启用编译需要同时配置 API Key 与模型 ID："
+                "AKC_LLM_API_KEY + AKC_LLM_MODEL"
+                "（兼容旧名 AKC_CLAUDE_API_KEY / AKC_CLAUDE_MODEL）；"
+                "模型 ID 不硬编码在代码里，示例见 .env.example"
             )
-        if self.claude_max_context_tokens < 1_000:
-            raise ValueError("AKC_CLAUDE_MAX_CONTEXT_TOKENS must be >= 1000")
+        if self.llm_max_context_tokens < 1_000:
+            raise ValueError("AKC_LLM_MAX_CONTEXT_TOKENS must be >= 1000")
         if self.job_max_attempts < 1:
             raise ValueError("AKC_JOB_MAX_ATTEMPTS must be >= 1")
         if not self.job_backoff_seconds:

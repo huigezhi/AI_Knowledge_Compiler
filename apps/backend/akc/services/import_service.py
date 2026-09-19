@@ -105,7 +105,7 @@ def import_conversation(
             job_id=_new_id("job"),
             job_type="COMPILE_CONVERSATION",
             idempotency_key="|".join(
-                ["COMPILE_CONVERSATION", conversation.id, "extractor-v1", settings.claude_model or "-"]
+                ["COMPILE_CONVERSATION", conversation.id, "extractor-v1", settings.llm_model or "-"]
             ),
             payload={"conversation_id": conversation.id},
             max_attempts=settings.job_max_attempts,

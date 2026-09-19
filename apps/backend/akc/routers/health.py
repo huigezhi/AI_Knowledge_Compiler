@@ -28,7 +28,7 @@ def health(settings: SettingsDep) -> dict[str, object]:
 def ready(settings: SettingsDep) -> dict[str, object]:
     """就绪探针：校验关键配置是否可用（数据库由迁移保证，此处只做轻量判断）。"""
     problems: list[str] = []
-    if settings.claude_enabled and not (settings.claude_api_key and settings.claude_model):
+    if settings.llm_enabled and not (settings.llm_api_key and settings.llm_model):
         problems.append("claude compiler enabled but api key/model missing")
     if not settings.data_dir.exists():
         problems.append("data_dir does not exist")

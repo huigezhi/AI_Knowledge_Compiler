@@ -33,7 +33,7 @@ def create_compile_job(
         from akc.errors import AppError, ErrorCode
 
         raise AppError("conversation_id is required", code=ErrorCode.BAD_REQUEST, http_status=400)
-    key_parts = (conv_id, "extractor-v1", settings.claude_model or "-")
+    key_parts = (conv_id, "extractor-v1", settings.llm_model or "-")
     if payload.idempotency_key:
         key_parts = key_parts + (payload.idempotency_key,)
     return enqueue_job(
