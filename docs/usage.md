@@ -89,6 +89,13 @@ npm run build   # 产物在 apps/extension/dist
 
 ---
 
+> **后端在远程 VPS 上时**：Options 里填 VPS 地址（如 `https://akc.example.com`）后点「保存」，
+> 浏览器会弹窗询问是否允许扩展访问该域名 —— 必须选「允许」，否则请求会被 Chrome 拦截并提示
+> "未授权访问 …"。采集本身不受后端位置影响（读取页面 DOM 发生在浏览器本地），
+> 受影响的只有数据上传这一段。另一种零改动的接法是 SSH 隧道，见 [scripts/README.md](../scripts/README.md)。
+
+---
+
 ## 第 5 步：采集对话
 
 打开任意受支持平台（chatgpt.com / claude.ai / chat.deepseek.com / doubao.com / chatglm.cn），

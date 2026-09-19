@@ -5,7 +5,8 @@
   "description": "采集 ChatGPT / Claude / DeepSeek / 豆包 / 智谱清言 的对话，编译为可复用的 Obsidian 知识。",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
-  "host_permissions": ["http://127.0.0.1:38127/*"],
+  "host_permissions": ["http://127.0.0.1:38127/*", "http://localhost:38127/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": {
     "service_worker": "background/index.js",
     "type": "module"

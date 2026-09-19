@@ -15,8 +15,13 @@
 
 ```jsonc
 "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
-"host_permissions": ["http://127.0.0.1:38127/*"]
+"host_permissions": ["http://127.0.0.1:38127/*", "http://localhost:38127/*"],
+"optional_host_permissions": ["http://*/*", "https://*/*"]
 ```
+
+`optional_host_permissions` **不会自动授予任何权限**：只有在用户于设置页点「保存／测试连接」
+（即用户手势）时，扩展才会针对所填地址调用 `chrome.permissions.request()`，
+由浏览器弹窗让用户确认。拒绝则保存失败并给出明确提示（见 `src/shared/permissions.ts`）。
 
 - 不申请 `<all_urls>`，只对 5 个 AI 平台注入 content script；
 - 不读取与采集无关的 `localStorage` / cookie；

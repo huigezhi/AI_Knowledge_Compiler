@@ -110,11 +110,35 @@ Windows 上可以用 `autossh`，或把这条命令加进上面的 `autostart.ba
 用 `install.sh --domain akc.example.com` 装 Caddy 自动签发证书，然后：
 
 1. 扩展 Options 里后端地址改成 `https://akc.example.com`
-2. VPS 上改 `/etc/akc/akc.env` 的 `AKC_CORS_ORIGINS=chrome-extension://<你的扩展ID>`
-3. `systemctl restart akc`
+2. **点「保存」**：扩展会弹窗申请访问该域名的权限，选「允许」
+   （MV3 的扩展 fetch 受 `host_permissions` 限制，默认只声明了本地回环地址，
+   远程地址需要动态授权；拒绝授权会提示"未授权访问 …"）
+3. VPS 上改 `/etc/akc/akc.env` 的 `AKC_CORS_ORIGINS=chrome-extension://<你的扩展ID>`
+4. `systemctl restart akc`
 
 > **不要**把 `AKC_HOST` 改成 `0.0.0.0`：生产模式下配置校验会直接拒绝非回环监听，
 > 这是为了防止本地服务被裸奔到公网。对外一律走反向代理或 SSH 隧道。
+
+### 采集会受影响吗？
+
+不会。采集发生在浏览器本地（content script 读页面 DOM），与后端在哪无关；
+受影响的只有"把结果送到后端"这一段。三件事要满足：
+
+1. **网络可达**：浏览器能连到 VPS（国外 VPS 受公网质量影响，丢包会让导入变慢或失败）；
+2. **主机权限**：见方案 2 第 2 步（方案 1 的 SSH 隧道不需要，仍是 127.0.0.1）；
+3. **CORS**：VPS 上把扩展来源写进 `AKC_CORS_ORIGINS`。
+
+另外注意：如果你用 Clash 等代理上网，确认代理规则**放行本地回环地址**，
+否则扩展连 `127.0.0.1` 也走代理会连不上后端。
+
+### 放国外 VPS 的真正动机：Claude API 可达
+
+把后端放国外 VPS 最大的收益不是采集，而是**编译**——后端调用 Claude API 不再需要额外代理。
+代价是：原始对话会离开本机（违背 local-first 的隐私前提），且 Vault 在 VPS 上，
+本机 Obsidian 需要靠 Git / Syncthing 同步。
+
+如果只是想要 Claude API 可达，又不想让数据出本机，更稳妥的组合是：
+**后端留在本机 + 给编译请求单独配代理**（`AKC_CLAUDE_BASE_URL` 指向你的代理网关）。
 
 ### Vault 同步提醒
 
