@@ -137,7 +137,10 @@ async function detectActive(): Promise<ActiveDetection> {
   const label = response.provider
     ? (PROVIDER_LABEL[response.provider] ?? response.provider)
     : "不支持的平台";
-  setText("provider-name", label);
+  // 扩展更新后旧页面里的内容脚本会失联：此时后台退回了 URL 判定结果，
+  // 平台名是对的，但采集要等页面刷新一次 —— 必须把这个动作讲清楚
+  const staleSuffix = response.stale ? "（刷新本页 F5 后即可采集）" : "";
+  setText("provider-name", `${label}${staleSuffix}`);
   setText("conversation-title", response.page === "conversation" ? "（当前会话页）" : "（不在会话详情页）");
 
   const health = await toBackground({ type: "AKC/HEALTH_CHECK" });

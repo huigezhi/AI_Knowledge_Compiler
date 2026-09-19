@@ -170,7 +170,7 @@ describe("历史会话自动遍历", () => {
       jsonResponse({ conversation_id: "x", created: true, created_messages: 1, updated_messages: 0 }),
     );
 
-    const start = (await dispatch({ type: "AKC/CRAWL_START", tabId: 7 })) as { ok: boolean };
+    const start = (await dispatch({ type: "AKC/CRAWL_START", tabId: 7, allowNavigation: true })) as { ok: boolean };
     expect(start.ok).toBe(true);
 
     await waitForCrawl(() => {
@@ -203,7 +203,7 @@ describe("历史会话自动遍历", () => {
       jsonResponse({ items: [{ id: "local_doubao_101", provider: "doubao", provider_conversation_id: "101", title: "会话甲" }], total: 1 }),
     );
 
-    await dispatch({ type: "AKC/CRAWL_START", tabId: 7 });
+    await dispatch({ type: "AKC/CRAWL_START", tabId: 7, allowNavigation: true });
     await waitForCrawl(() => {
       const status = runtimeSendMessage.mock.calls.at(-1)?.[0] as { progress?: { running?: boolean } } | undefined;
       return status?.progress?.running === false;
@@ -222,7 +222,7 @@ describe("历史会话自动遍历", () => {
     tabsSendMessage.mockResolvedValue({ ok: true, items });
     fetchMock.mockResolvedValue(jsonResponse({ items: [], total: 0 }));
 
-    await dispatch({ type: "AKC/CRAWL_START", tabId: 7 });
+    await dispatch({ type: "AKC/CRAWL_START", tabId: 7, allowNavigation: true });
     await waitForCrawl(() => {
       const status = runtimeSendMessage.mock.calls.at(-1)?.[0] as { progress?: { running?: boolean } } | undefined;
       return status?.progress?.running === false;
@@ -346,4 +346,46 @@ describe("历史会话静默同步（面板「自动同步历史」）", () => {
     expect(attempts).toBe(2);
     expect(progress.failed).toBe(1);
   }, 30_000);
+});
+
+describe("导航式遍历的安全闸门", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    tabsUpdate.mockReset();
+    tabsSendMessage.mockReset();
+    tabsGet.mockReset();
+    tabsQuery.mockReset();
+    runtimeSendMessage.mockReset();
+    tabsQuery.mockResolvedValue([{ id: 7, url: "https://www.doubao.com/chat/origin" }]);
+  });
+
+  it("默认拒绝：不带 allowNavigation 的 CRAWL_START 不允许导航标签页", async () => {
+    const response = (await dispatch({ type: "AKC/CRAWL_START", tabId: 7 })) as {
+      ok: boolean;
+      code: string;
+    };
+    expect(response.ok).toBe(false);
+    expect(response.code).toBe("NAVIGATION_DISABLED");
+    // 关键：一次导航都不能发生
+    expect(tabsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("DETECT_ACTIVE 在内容脚本失联时退回 URL 判定，而不是报未检测到会话", async () => {
+    tabsQuery.mockResolvedValue([
+      { id: 9, url: "https://chat.deepseek.com/a/chat/s/6d2095af" },
+    ]);
+    // 模拟扩展更新后内容脚本失联
+    tabsSendMessage.mockRejectedValue(new Error("Receiving end does not exist"));
+
+    const response = (await dispatch({ type: "AKC/DETECT_ACTIVE" })) as {
+      ok: boolean;
+      provider?: string;
+      page?: string;
+      stale?: boolean;
+    };
+    expect(response.ok).toBe(true);
+    expect(response.provider).toBe("deepseek");
+    expect(response.page).toBe("conversation");
+    expect(response.stale).toBe(true);
+  });
 });

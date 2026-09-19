@@ -28,7 +28,13 @@ function ok(payload: Record<string, unknown>): MessageResponse {
 
 function fail(error: unknown): MessageResponse {
   const message = error instanceof Error ? error.message : String(error);
-  logger.warn("content_script_error", { message });
+  // 适配器解析失败是**预期内**的常见状态：页面还没渲染完、离线骨架屏、
+  // 遍历轮询期间每秒一次 —— 用 warn 会把 chrome://extensions 的错误列表刷爆，
+  // 用户还以为插件崩了。这类降为 debug；其余（真正的意外失败）保持 warn。
+  const parseFailed =
+    typeof error === "object" && error !== null && (error as { name?: string }).name === "AdapterParseError";
+  if (parseFailed) logger.debug("content_script_parse_pending", { message });
+  else logger.warn("content_script_error", { message });
   return {
     ok: false,
     code: "ADAPTER_PARSE_FAILED",

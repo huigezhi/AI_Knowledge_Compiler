@@ -32,6 +32,15 @@ function isPlatformTab(url: string | undefined): boolean {
 }
 
 /**
+ * Service Worker 里没有 DOM。detectPage 对会话 URL 只做 URL 判定、不会碰 DOM，
+ * 但对非会话 URL 会去数历史列表节点 —— 给个永远返回空的假根，避免崩溃。
+ */
+const DOMLESS_ROOT = {
+  querySelectorAll: () => [],
+  querySelector: () => null,
+} as unknown as ParentNode;
+
+/**
  * 找到应该与侧边栏对话的标签页。
  *
  * 侧边栏是**窗口级**的：用户在豆包打开侧边栏后切到别的标签页查资料，
@@ -168,6 +177,7 @@ async function navigateAndFetch(
 async function runCrawl(tabId: number, limit: number, skipExisting: boolean | undefined): Promise<void> {
   // 整个函数必须从头到尾在 try 里：fire-and-forget 调用（void runCrawl）
   // 抛出的任何异常都会变成未处理拒绝，被 Chrome 计入扩展页的「错误」按钮
+  let consecutiveFailures = 0;
   try {
     const settings = await loadSettings();
     const useSkipExisting = skipExisting ?? settings.crawlSkipExisting;
@@ -233,6 +243,11 @@ async function runCrawl(tabId: number, limit: number, skipExisting: boolean | un
 
     for (const [index, target] of targets.entries()) {
       if (crawl.cancelRequested) break;
+      // 连续失败熔断：多半是平台改版或被限流，继续导航只会放大风险
+      if (consecutiveFailures >= 5) {
+        crawl.progress.lastError = `连续 ${consecutiveFailures} 条失败，已停止导航式遍历`;
+        break;
+      }
       crawl.progress.current = target.title;
       broadcastProgress();
       try {
@@ -246,8 +261,10 @@ async function runCrawl(tabId: number, limit: number, skipExisting: boolean | un
           compile: settings.autoCompile,
         });
         crawl.progress.ok += 1;
+        consecutiveFailures = 0;
       } catch (error) {
         crawl.progress.failed += 1;
+        consecutiveFailures += 1;
         crawl.progress.lastError = error instanceof Error ? error.message : String(error);
         logger.warn("crawl_item_failed", { title: target.title, error: crawl.progress.lastError });
       }
@@ -581,6 +598,17 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
       }
 
       if (message.type === "AKC/CRAWL_START") {
+        // 导航式遍历默认拒绝：它会把用户的标签页逐个导航到每个历史会话，
+        // 页面疯狂跳转、既卡顿又有平台账号风控风险（用户实测反馈过）。
+        // 正常路径是 AKC/SYNC_HISTORY_NOW（静默同步，不导航）。
+        if (!message.allowNavigation) {
+          sendResponse({
+            ok: false,
+            code: "NAVIGATION_DISABLED",
+            message: "导航式遍历已停用：请使用「自动同步历史」（后台静默读取，不跳转页面）。",
+          });
+          return;
+        }
         if (crawl.running) {
           sendResponse({ ok: false, code: "CRAWL_BUSY", message: "已有遍历任务在进行中" });
           return;
@@ -634,12 +662,32 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
           sendResponse({ ok: false, code: "NO_ACTIVE_TAB", message: "没有活动的标签页" });
           return;
         }
-        if (!isPlatformTab(active.url)) {
-          sendResponse({ ok: false, code: "NOT_PLATFORM_PAGE", message: "当前页面不是受支持的聊天平台" });
+        const url = active.url ?? "";
+        const adapter = adapterForUrl(url);
+        if (!adapter) {
+          sendResponse({
+            ok: false,
+            code: "NOT_PLATFORM_PAGE",
+            message: "当前页面不是受支持的聊天平台",
+          });
           return;
         }
-        const result = (await toContentScript(active.id, { type: "AKC/DETECT_PAGE" })) as MessageResponse;
-        sendResponse(result ?? { ok: false, code: "NO_RESPONSE", message: "content script 未响应" });
+
+        // 优先让内容脚本给准确结果；但扩展更新后，旧页面里的内容脚本会失联
+        // （"Receiving end does not exist"）。此时不能直接判"未检测到会话"——
+        // 平台名从 URL 就能确定，只是页面需要刷新一次才能采集。
+        let probed: MessageResponse | null = null;
+        try {
+          probed = (await toContentScript(active.id, { type: "AKC/DETECT_PAGE" })) as MessageResponse;
+        } catch {
+          probed = null;
+        }
+        if (probed?.ok && "provider" in probed) {
+          sendResponse(probed);
+          return;
+        }
+        const page = adapterForUrl(url, { url, root: DOMLESS_ROOT })?.detectPage() ?? "unknown";
+        sendResponse({ ok: true, provider: adapter.id, page, stale: true });
         return;
       }
 

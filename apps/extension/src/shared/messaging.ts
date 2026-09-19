@@ -41,8 +41,16 @@ export type Message =
   | { type: "AKC/OPEN_SIDE_PANEL"; tabId?: number }
   // ---- 自动保存（content script 检测到变化后上报，由后台入库）----
   | { type: "AKC/AUTO_SAVE"; conversation: Conversation }
-  // ---- 历史会话自动遍历（导航式，会切换页面；保留为兜底，面板不再主动调用）----
-  | { type: "AKC/CRAWL_START"; tabId?: number; limit?: number; skipExisting?: boolean }
+  // ---- 历史会话自动遍历（导航式，会切换页面）----
+  // allowNavigation 必须显式给 true：默认拒绝，避免旧面板/误调用把用户的标签页
+  // 逐个导航一遍（既卡顿又有平台风控风险）。真正需要的兜底场景才传这个标志。
+  | {
+      type: "AKC/CRAWL_START";
+      tabId?: number;
+      limit?: number;
+      skipExisting?: boolean;
+      allowNavigation?: boolean;
+    }
   | { type: "AKC/CRAWL_CANCEL" }
   | { type: "AKC/CRAWL_STATUS" }
   // ---- 历史会话静默同步（免跳转，面板「自动同步历史」走这条）----
@@ -51,7 +59,7 @@ export type Message =
   | { type: "AKC/CRAWL_PROGRESS"; progress: CrawlProgress };
 
 export type MessageResponse =
-  | { ok: true; provider: ProviderId | null; page: PageKind }
+  | { ok: true; provider: ProviderId | null; page: PageKind; stale?: boolean }
   | { ok: true; items: ConversationSummary[] }
   | { ok: true; conversation: Conversation }
   | { ok: true; health: AdapterHealth }
