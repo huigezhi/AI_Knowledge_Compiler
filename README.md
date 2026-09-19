@@ -89,6 +89,9 @@ AI_Knowledge_Compiler/
 
 ## 4. 快速开始
 
+> 完整的首次上手流程（含令牌配置、采集、编译、写入、审核与排查）见
+> [docs/usage.md](docs/usage.md)。以下是最小命令集。
+
 ### 4.1 本地后端
 
 ```bash
@@ -155,6 +158,7 @@ RAW ──▶ CANDIDATE ──▶ REVIEW ──▶ VERIFIED ──▶ ARCHIVED
 
 | 文档 | 内容 |
 | --- | --- |
+| [docs/usage.md](docs/usage.md) | **首次上手指南**：启动 → 加载扩展 → 采集 → 编译 → 写入 → 审核 |
 | [docs/architecture.md](docs/architecture.md) | 分层架构、决策记录、数据流 |
 | [docs/data-model.md](docs/data-model.md) | Universal Schema、表结构、完整性约束 |
 | [docs/api.md](docs/api.md) | REST API 全量契约与错误结构 |
