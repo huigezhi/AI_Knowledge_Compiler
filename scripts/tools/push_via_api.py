@@ -69,7 +69,12 @@ def main(argv: list[str]) -> int:
     if len(argv) < 4:
         print(__doc__)
         return 2
-    token, base_sha, commits = argv[1], argv[2], argv[3:]
+    token, base_sha = argv[1], argv[2]
+    commits = argv[3:]
+    if not commits:
+        # 不指定时自动展开 base..HEAD 的全部提交 —— 只传 HEAD 会静默漏掉中间提交
+        commits = git("rev-list", "--reverse", f"{base_sha}..HEAD").split()
+        print(f"自动展开待推送提交 {len(commits)} 个")
     headers = {**HEADERS, "Authorization": f"Bearer {token}"}
 
     with httpx.Client(trust_env=False, timeout=60.0) as client:  # 直连，绕过环境代理
@@ -117,7 +122,12 @@ def main(argv: list[str]) -> int:
             current, tree_base = created["sha"], created["tree"]["sha"]
             print(f"pushed {commit[:7]} -> {current[:7]}  ({len(entries)} files)")
 
-        r = client.patch(f"{BASE}/git/refs/heads/main", headers=headers, json={"sha": current})
+        # force=True：允许在历史被重写/补推时覆盖远端引用（此仓库无协作者，安全）
+        r = client.patch(
+            f"{BASE}/git/refs/heads/main",
+            headers=headers,
+            json={"sha": current, "force": True},
+        )
         if r.status_code != 200:
             print(f"ref 更新失败: {r.status_code} {r.text[:200]}")
             return 1
