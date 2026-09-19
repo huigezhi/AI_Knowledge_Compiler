@@ -113,8 +113,13 @@ curl -fsSL -o %TEMP%\install.bat https://raw.githubusercontent.com/huigezhi/AI_K
 **Ubuntu / Debian**
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compiler/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compiler/main/install.sh -o /tmp/akc-install.sh && bash /tmp/akc-install.sh
 ```
+
+> 不要用 `bash <(curl ...)`：不少 VPS 没有 `/dev/fd`，进程替换会报
+> `bash: /dev/fd/63: No such file or directory`。上面的写法先落盘再执行，任何环境都能跑。
+> 国内 VPS 访问 GitHub / PyPI 慢时，可在命令前加镜像，例如：
+> `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple bash /tmp/akc-install.sh`。
 
 脚本做的事：检查环境 → 克隆/更新代码到 `~/ai-knowledge-compiler`（Linux 装到 `/opt/akc`）→
 装依赖 → 构建 Chrome 扩展 → 生成 `.env` → 启动后端 → 健康检查。
@@ -123,7 +128,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compil
 
 - **Windows**：[git](https://git-scm.com/download/win) + [Python 3.12+](https://www.python.org/downloads/)（安装时勾选 *Add python.exe to PATH*）。
   [Node.js](https://nodejs.org) 可选 —— 没有它只装后端，装好后重跑脚本即可补建扩展。
-- **Ubuntu / Debian**：无（脚本会用 apt 自动安装缺失的 git / python3 / venv / pip）。
+- **Ubuntu / Debian**：无（脚本会用 apt 自动安装缺失的 git / curl / python3；
+  系统自带 Python 低于 3.12 时，Ubuntu 会自动走 deadsnakes 装 3.12）。
   Linux 版安装为 systemd 服务，一般装在 VPS 上，本地 Chrome 扩展走 SSH 隧道连接。
 
 ### 4.2 本地后端

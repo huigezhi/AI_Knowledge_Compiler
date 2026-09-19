@@ -10,6 +10,10 @@
 # 幂等：重复执行只会更新代码、依赖与服务配置，不覆盖已有 /etc/akc/akc.env。
 set -euo pipefail
 
+# 允许外层一键脚本指定解释器（如 deadsnakes 装出的 python3.12）：
+# Ubuntu 22.04 自带 3.10、Debian 12 自带 3.11，都达不到 3.12+ 的硬性要求。
+PYTHON="${PYTHON:-python3}"
+
 DIR="/opt/akc"
 USER="akc"
 PORT="38127"
@@ -31,12 +35,14 @@ done
 
 if [[ $EUID -ne 0 ]]; then echo "请使用 sudo 运行" >&2; exit 1; fi
 command -v systemctl >/dev/null || { echo "需要 systemd" >&2; exit 1; }
-command -v python3  >/dev/null || { echo "需要 python3" >&2; exit 1; }
+command -v "$PYTHON" >/dev/null || { echo "找不到解释器: $PYTHON" >&2; exit 1; }
 
-PY_MAJOR=$(python3 -c 'import sys;print(sys.version_info.major)')
-PY_MINOR=$(python3 -c 'import sys;print(sys.version_info.minor)')
+PY_MAJOR=$("$PYTHON" -c 'import sys;print(sys.version_info.major)')
+PY_MINOR=$("$PYTHON" -c 'import sys;print(sys.version_info.minor)')
 if (( PY_MAJOR < 3 || (PY_MAJOR == 3 && PY_MINOR < 12) )); then
-  echo "需要 Python 3.12+，当前为 ${PY_MAJOR}.${PY_MINOR}" >&2; exit 1
+  echo "需要 Python 3.12+，当前 $PYTHON 为 ${PY_MAJOR}.${PY_MINOR}" >&2
+  echo "可用 PYTHON=/usr/bin/python3.12 环境变量指定其它解释器" >&2
+  exit 1
 fi
 
 echo "==> 同步代码到 ${DIR}"
@@ -59,8 +65,10 @@ if ! id -u "$USER" >/dev/null 2>&1; then
 fi
 
 echo "==> 创建虚拟环境并安装依赖"
-python3 -m venv "$DIR/apps/backend/.venv"
-"$DIR/apps/backend/.venv/bin/pip" install --disable-pip-version-check -q -i https://pypi.org/simple -e "$DIR/apps/backend"
+# 国内 VPS 访问 pypi.org 慢/不通时：PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple bash install.sh
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple}"
+"$PYTHON" -m venv "$DIR/apps/backend/.venv"
+"$DIR/apps/backend/.venv/bin/pip" install --disable-pip-version-check -q -i "$PIP_INDEX_URL" -e "$DIR/apps/backend"
 echo "    依赖安装完成"
 
 DATA_DIR="$DIR/apps/backend/data"
@@ -70,7 +78,7 @@ mkdir -p "$DATA_DIR" "$VAULT_DIR"
 echo "==> 写入环境配置 /etc/akc/akc.env"
 mkdir -p /etc/akc
 if [[ ! -f /etc/akc/akc.env ]]; then
-  TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"
+  TOKEN="$("$PYTHON" -c 'import secrets;print(secrets.token_urlsafe(32))')"
   cat > /etc/akc/akc.env <<EOF
 # AKC 后端配置（安装脚本生成；修改后执行 systemctl restart akc）
 AKC_ENV=production
