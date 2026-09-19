@@ -37,6 +37,7 @@
         <button id="btn-save-compile">保存 + 编译</button>
         <button id="btn-health" class="ghost">健康检查</button>
       </div>
+      <p id="health-result" class="hint">「健康检查」会依次检查后端服务、Obsidian 库、AI 编译配置与当前页面适配器。</p>
     </section>
 
     <section class="card">
@@ -49,8 +50,8 @@
         <button id="btn-crawl-cancel" class="ghost" hidden>取消</button>
       </div>
       <p class="hint">
-        「自动同步历史」会在这个标签页里依次打开每个历史会话、采集完再回到你原来的页面，
-        所以<strong>没点开过的会话也能采到</strong>。期间请勿操作该标签页；可随时取消。
+        「自动同步历史」在<strong>后台静默读取</strong>未采集的历史会话：不跳转页面、
+        不干扰你当前的操作。已入库的自动跳过，单条失败最多重试一次，连续失败会主动停止。
       </p>
       <div id="crawl-progress" class="muted"></div>
       <ul id="history-list" class="history"></ul>
@@ -60,7 +61,7 @@
     <section class="card">
       <div class="card-head">
         <h2>编译结果</h2>
-        <button id="btn-write-obsidian" class="ghost">写入 Obsidian</button>
+        <button id="btn-write-obsidian" class="ghost">写入全部</button>
       </div>
       <div id="compile-summary" class="stats">
         <span>识别 <b id="stat-items">0</b> 个知识</span>
@@ -68,6 +69,10 @@
         <span>已入库 <b id="stat-created">0</b></span>
       </div>
       <div id="job-stage" class="muted"></div>
+      <div class="actions">
+        <button id="btn-write-current" class="primary" disabled>一键写入 Obsidian</button>
+      </div>
+      <p id="write-target" class="hint">先「保存 + 编译」一次，这里即可把本次结果一键写入 Obsidian。</p>
       <ul id="knowledge-list" class="knowledge"></ul>
     </section>
 

@@ -10,12 +10,20 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
+/** 预设 / 自定义输入框的联动：只有选「自定义」时才需要填秒数。 */
+function syncDelayPresetUi(): void {
+  const custom = el<HTMLSelectElement>("auto-save-delay-preset").value === "custom";
+  el("auto-save-delay-custom").hidden = !custom;
+}
+
 function fill(settings: ExtensionSettings): void {
   el<HTMLInputElement>("backend-url").value = settings.backendUrl;
   el<HTMLInputElement>("auth-token").value = settings.authToken;
   el<HTMLInputElement>("batch-size").value = String(settings.batchSize);
   el<HTMLInputElement>("auto-save").checked = settings.autoSave;
+  el<HTMLSelectElement>("auto-save-delay-preset").value = settings.autoSaveDelayPreset;
   el<HTMLInputElement>("auto-save-delay").value = String(settings.autoSaveDelaySeconds);
+  syncDelayPresetUi();
   el<HTMLInputElement>("crawl-skip-existing").checked = settings.crawlSkipExisting;
   el<HTMLInputElement>("crawl-item-timeout").value = String(settings.crawlItemTimeoutSeconds);
   el<HTMLInputElement>("write-raw").checked = settings.writeRawToObsidian;
@@ -31,6 +39,8 @@ function collect(): Partial<ExtensionSettings> {
     authToken: el<HTMLInputElement>("auth-token").value.trim(),
     batchSize: Number(el<HTMLInputElement>("batch-size").value) || 20,
     autoSave: el<HTMLInputElement>("auto-save").checked,
+    autoSaveDelayPreset: el<HTMLSelectElement>("auto-save-delay-preset")
+      .value as ExtensionSettings["autoSaveDelayPreset"],
     // 去抖时长必须 >=1 秒：0 会让流式输出的每一帧都触发一次采集
     autoSaveDelaySeconds: Math.max(1, Number(el<HTMLInputElement>("auto-save-delay").value) || 5),
     crawlSkipExisting: el<HTMLInputElement>("crawl-skip-existing").checked,
@@ -44,6 +54,11 @@ function collect(): Partial<ExtensionSettings> {
     ),
     logLevel: el<HTMLSelectElement>("log-level").value as ExtensionSettings["logLevel"],
   };
+}
+
+/** 采集策略区的实时联动（预设切换时显示/隐藏自定义秒数）。 */
+function wireLocalUi(): void {
+  el<HTMLSelectElement>("auto-save-delay-preset").addEventListener("change", syncDelayPresetUi);
 }
 
 function currentClient(): AkcApiClient {
@@ -146,6 +161,7 @@ async function testConnection(): Promise<void> {
 
 async function boot(): Promise<void> {
   fill(await loadSettings());
+  wireLocalUi();
   el("btn-test").addEventListener("click", () => void testConnection());
   el("btn-save").addEventListener("click", () => void saveAll());
   await refreshVaultStatus();

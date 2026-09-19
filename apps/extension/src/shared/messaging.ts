@@ -32,6 +32,8 @@ export interface CrawlProgress {
 export type Message =
   | { type: "AKC/PING" }
   | { type: "AKC/DETECT_PAGE"; tabId?: number }
+  /** 只探测**当前活动标签页**（不回退到最近用过的平台页）——侧边栏实时显示用。 */
+  | { type: "AKC/DETECT_ACTIVE" }
   | { type: "AKC/LIST_CONVERSATIONS"; tabId?: number; limit?: number }
   | { type: "AKC/FETCH_CURRENT"; tabId?: number }
   | { type: "AKC/FETCH_REMOTE"; url: string; tabId?: number }
@@ -39,10 +41,12 @@ export type Message =
   | { type: "AKC/OPEN_SIDE_PANEL"; tabId?: number }
   // ---- 自动保存（content script 检测到变化后上报，由后台入库）----
   | { type: "AKC/AUTO_SAVE"; conversation: Conversation }
-  // ---- 历史会话自动遍历 ----
+  // ---- 历史会话自动遍历（导航式，会切换页面；保留为兜底，面板不再主动调用）----
   | { type: "AKC/CRAWL_START"; tabId?: number; limit?: number; skipExisting?: boolean }
   | { type: "AKC/CRAWL_CANCEL" }
   | { type: "AKC/CRAWL_STATUS" }
+  // ---- 历史会话静默同步（免跳转，面板「自动同步历史」走这条）----
+  | { type: "AKC/SYNC_HISTORY_NOW"; limit?: number }
   /** 后台 → 侧边栏的进度推送（不经 chrome.runtime.onMessage 的响应通道）。 */
   | { type: "AKC/CRAWL_PROGRESS"; progress: CrawlProgress };
 

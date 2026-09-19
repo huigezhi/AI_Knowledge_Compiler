@@ -85,10 +85,18 @@
 
       <label><input id="auto-save" type="checkbox" /> <strong>自动保存当前会话</strong></label>
       <p class="hint">
-        开启后：你在这个平台的会话内容一有变化，停手
-        <input id="auto-save-delay" type="number" min="1" max="600" class="inline" />
-        秒就自动归档，<strong>不用再点按钮</strong>。
-        连续对话（含 AI 流式输出）期间不会被打断。
+        开启后：你在这个平台的会话内容一有变化，停手这么久
+        <select id="auto-save-delay-preset">
+          <option value="5s">5 秒</option>
+          <option value="2m">2 分钟</option>
+          <option value="5m">5 分钟</option>
+          <option value="custom">自定义</option>
+        </select>
+        <span id="auto-save-delay-custom">
+          <input id="auto-save-delay" type="number" min="1" max="600" class="inline" /> 秒
+        </span>
+        就自动归档，<strong>不用再点按钮</strong>。
+        连续对话（含 AI 流式输出）期间不会被打断；切换到别的会话时会先把当前会话存好。
       </p>
 
       <label><input id="crawl-skip-existing" type="checkbox" /> 自动同步历史时跳过已入库会话</label>

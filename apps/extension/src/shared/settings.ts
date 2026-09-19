@@ -7,6 +7,23 @@
  * * 所有设置项都有默认值，缺失时不会阻塞 UI。
  */
 
+/** 自动保存间隔的预设档位。 */
+export type AutoSaveDelayPreset = "5s" | "2m" | "5m" | "custom";
+
+export const AUTO_SAVE_PRESET_SECONDS: Record<Exclude<AutoSaveDelayPreset, "custom">, number> = {
+  "5s": 5,
+  "2m": 120,
+  "5m": 300,
+};
+
+/** 把预设 + 自定义数值折算成实际秒数（唯一真值入口，避免两处各算一套）。 */
+export function resolveAutoSaveDelaySeconds(settings: ExtensionSettings): number {
+  if (settings.autoSaveDelayPreset === "custom") {
+    return Math.max(1, Math.round(settings.autoSaveDelaySeconds || 5));
+  }
+  return AUTO_SAVE_PRESET_SECONDS[settings.autoSaveDelayPreset] ?? 5;
+}
+
 export interface ExtensionSettings {
   backendUrl: string;
   authToken: string;
@@ -21,6 +38,11 @@ export interface ExtensionSettings {
    * 数据只发往本机后端，不经过任何第三方。
    */
   autoSave: boolean;
+  /**
+   * 自动保存间隔预设：5 秒 / 2 分钟 / 5 分钟。
+   * 选 custom 时用 ``autoSaveDelaySeconds`` 的数值（秒）。
+   */
+  autoSaveDelayPreset: AutoSaveDelayPreset;
   /** 自动保存的去抖时长（秒）：连续输入期间不打断，停手这么久后才保存。 */
   autoSaveDelaySeconds: number;
   /**
@@ -47,15 +69,17 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   batchSize: 20,
   autoSave: true,
   // 5 秒：比 15 秒更跟手，又不会在流式输出期间频繁打断
+  autoSaveDelayPreset: "5s",
   autoSaveDelaySeconds: 5,
   historyAutoSync: true,
-  historySyncIntervalMinutes: 15,
+  // 10 分钟：比 15 分钟勤一点，又不至于频繁打扰平台
+  historySyncIntervalMinutes: 10,
   crawlSkipExisting: true,
   crawlItemTimeoutSeconds: 20,
   logLevel: "info",
 };
 
-const STORAGE_KEY = "akc.settings";
+export const STORAGE_KEY = "akc.settings";
 
 /** ``chrome.storage`` 在测试/非扩展环境下不存在，这里统一降级到内存，保证 UI 可渲染。 */
 const memory = new Map<string, unknown>();
@@ -87,6 +111,8 @@ export async function loadSettings(): Promise<ExtensionSettings> {
   // 用户显式改过的其它值不受影响。
   if (stored.autoSaveDelaySeconds === 15) delete stored.autoSaveDelaySeconds;
   if (stored.autoCompile === false) delete stored.autoCompile;
+  // 旧版存过 15 分钟周期的，视为"没主动改过"，跟随新的 10 分钟默认值
+  if (stored.historySyncIntervalMinutes === 15) delete stored.historySyncIntervalMinutes;
   return { ...DEFAULT_SETTINGS, ...stored } as ExtensionSettings;
 }
 

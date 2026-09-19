@@ -233,3 +233,117 @@ describe("历史会话自动遍历", () => {
     expect(last.progress.skipped).toBe(1);
   }, 20_000);
 });
+
+/** 等过手动节流窗口：否则用例之间会互相挡住（上一轮刚跑完）。 */
+async function allowManualSync(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 3_200));
+}
+
+/**
+ * 等待**本轮**静默同步结束，并返回结束时的进度快照。
+ *
+ * 只看 baseline 之后新增的广播，且取「静默同步自己」的那一条——
+ * 结束后后台还会再推一次自动保存用的 crawl.progress，直接取最后一条会拿到它。
+ */
+async function waitForSilentFinish(
+  baseline: number,
+  timeoutMs = 20000,
+): Promise<Record<string, number | boolean | string | undefined>> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const fresh = runtimeSendMessage.mock.calls.slice(baseline);
+    for (const call of fresh) {
+      const progress = (call[0] as { progress?: Record<string, unknown> } | undefined)?.progress;
+      if (progress && progress.running === false && progress.finishedAt) {
+        return progress as Record<string, number | boolean | string | undefined>;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("等待静默同步结束超时");
+}
+
+describe("历史会话静默同步（面板「自动同步历史」）", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    tabsUpdate.mockReset();
+    tabsSendMessage.mockReset();
+    tabsGet.mockReset();
+    tabsQuery.mockReset();
+    runtimeSendMessage.mockReset();
+    tabsQuery.mockResolvedValue([{ id: 7, url: "https://www.doubao.com/chat/origin" }]);
+    tabsGet.mockResolvedValue({ id: 7, url: "https://www.doubao.com/chat/origin" });
+    // 后端：历史列表为空（都没有采过）+ 导入成功
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes("/api/v1/conversations?")) {
+        return jsonResponse({ items: [], total: 0, count: 0 });
+      }
+      return jsonResponse({ conversation_id: "x", created: true, created_messages: 1, updated_messages: 0 });
+    });
+  });
+
+  it("全程不导航标签页：只发 FETCH_REMOTE，一次 tabs.update 都不调用", async () => {
+    const items = [summary("301", "会话丙"), summary("302", "会话丁")];
+    tabsSendMessage.mockImplementation((_tabId: number, message: { type: string; url?: string }) => {
+      if (message.type === "AKC/LIST_CONVERSATIONS") return Promise.resolve({ ok: true, items });
+      if (message.type === "AKC/FETCH_REMOTE") {
+        const id = /\/chat\/(\d+)/.exec(message.url ?? "")?.[1] ?? "0";
+        return Promise.resolve({ ok: true, conversation: conversation(id, `会话${id}`) });
+      }
+      return Promise.resolve({ ok: false, code: "UNSUPPORTED" });
+    });
+
+    await allowManualSync();
+    const baseline = runtimeSendMessage.mock.calls.length;
+    const start = (await dispatch({ type: "AKC/SYNC_HISTORY_NOW" })) as { ok: boolean };
+    expect(start.ok).toBe(true);
+
+    const progress = await waitForSilentFinish(baseline);
+
+    // 核心回归点：静默同步绝不能动用户的标签页
+    // （旧实现会逐个导航历史会话，既卡顿又有平台账号风控风险）
+    expect(tabsUpdate).not.toHaveBeenCalled();
+    expect(progress.total).toBe(2);
+    expect(progress.ok).toBe(2);
+    expect(progress.failed).toBe(0);
+  }, 30_000);
+
+  it("连点节流：刚同步过就返回可提示的原因，而不是又跑一轮", async () => {
+    tabsSendMessage.mockImplementation((_tabId: number, message: { type: string }) => {
+      if (message.type === "AKC/LIST_CONVERSATIONS") return Promise.resolve({ ok: true, items: [] });
+      return Promise.resolve({ ok: false, code: "UNSUPPORTED" });
+    });
+
+    await allowManualSync();
+    const baseline = runtimeSendMessage.mock.calls.length;
+    const first = (await dispatch({ type: "AKC/SYNC_HISTORY_NOW" })) as { ok: boolean };
+    expect(first.ok).toBe(true);
+    await waitForSilentFinish(baseline);
+
+    const second = (await dispatch({ type: "AKC/SYNC_HISTORY_NOW" })) as { ok: boolean; code: string };
+    expect(second.ok).toBe(false);
+    expect(second.code).toBe("SYNC_NOT_STARTED");
+  }, 30_000);
+
+  it("单条失败最多重试一次，仍失败才计入 failed", async () => {
+    const items = [summary("401", "会话戊")];
+    let attempts = 0;
+    tabsSendMessage.mockImplementation((_tabId: number, message: { type: string }) => {
+      if (message.type === "AKC/LIST_CONVERSATIONS") return Promise.resolve({ ok: true, items });
+      if (message.type === "AKC/FETCH_REMOTE") {
+        attempts += 1;
+        return Promise.resolve({ ok: false, code: "REMOTE_EMPTY_RENDER", message: "离线解析失败" });
+      }
+      return Promise.resolve({ ok: false, code: "UNSUPPORTED" });
+    });
+
+    await allowManualSync();
+    const baseline = runtimeSendMessage.mock.calls.length;
+    await dispatch({ type: "AKC/SYNC_HISTORY_NOW" });
+    const progress = await waitForSilentFinish(baseline);
+
+    // 单条最多 2 次尝试（首次 + 1 次重试），不是无限重试
+    expect(attempts).toBe(2);
+    expect(progress.failed).toBe(1);
+  }, 30_000);
+});

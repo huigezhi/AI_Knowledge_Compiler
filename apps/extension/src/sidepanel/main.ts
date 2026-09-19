@@ -44,6 +44,10 @@ interface State {
   history: ConversationSummary[];
   lastConversationId: string | null;
   knowledgeIds: string[];
+  /** 最近一次编译产出的知识 id（「一键写入 Obsidian」只写这批，不是全部知识）。 */
+  lastCompileKnowledgeIds: string[];
+  /** Obsidian 写入目标（供用户确认文件会落到哪里）。 */
+  vault: { configured: boolean; vault_path: string | null; knowledge_folder: string } | null;
   lastAction: (() => Promise<void>) | null;
 }
 
@@ -54,6 +58,8 @@ const state: State = {
   history: [],
   lastConversationId: null,
   knowledgeIds: [],
+  lastCompileKnowledgeIds: [],
+  vault: null,
   lastAction: null,
 };
 
@@ -93,29 +99,70 @@ async function toBackground(payload: Record<string, unknown>): Promise<MessageRe
   });
 }
 
-async function detectProvider(): Promise<void> {
-  const response = await toBackground({ type: "AKC/DETECT_PAGE" });
+/** 平台识别结果（供健康检查等调用方复用）。 */
+interface ActiveDetection {
+  provider: ProviderId | null;
+  label: string;
+  page: string | null;
+  note: string;
+}
+
+/**
+ * 实时识别**当前活动标签页**。
+ *
+ * 以前只在面板打开时探测一次，且后台会回退到"最近用过的平台页"——
+ * 于是用户切到别的页面后，面板永远停在上一次的结果，看起来像坏了。
+ * 现在走 AKC/DETECT_ACTIVE（只认活动标签页，不回退），并监听标签页切换/加载。
+ */
+async function detectActive(): Promise<ActiveDetection> {
+  const response = await toBackground({ type: "AKC/DETECT_ACTIVE" });
   if (!response.ok) {
-    setText("provider-name", "未检测到会话");
-    setText(
-      "adapter-health",
+    const note =
       response.code === "CONTENT_SCRIPT_STALE"
         ? "扩展刚更新：刷新平台页面（F5）后即可"
-        : "请打开豆包 / DeepSeek / ChatGPT 等聊天页面",
-    );
-    return;
+        : response.code === "NOT_PLATFORM_PAGE"
+          ? "当前页面不是受支持的聊天平台"
+          : response.message;
+    state.provider = null;
+    setText("provider-name", "未检测到会话");
+    setText("conversation-title", "—");
+    setText("adapter-health", note);
+    return { provider: null, label: "未检测到会话", page: null, note };
   }
-  if (!("provider" in response)) return;
+  if (!("provider" in response)) {
+    return { provider: null, label: "未检测到会话", page: null, note: "探测结果不完整" };
+  }
+
   state.provider = response.provider;
-  setText("provider-name", response.provider ? (PROVIDER_LABEL[response.provider] ?? response.provider) : "不支持的平台");
+  const label = response.provider
+    ? (PROVIDER_LABEL[response.provider] ?? response.provider)
+    : "不支持的平台";
+  setText("provider-name", label);
   setText("conversation-title", response.page === "conversation" ? "（当前会话页）" : "（不在会话详情页）");
 
   const health = await toBackground({ type: "AKC/HEALTH_CHECK" });
+  let note = "—";
   if (health.ok && "health" in health) {
-    const label = { healthy: "正常", degraded: "降级", unhealthy: "异常" }[health.health.status];
-    const domVersion = health.health.dom_version ?? "";
-    setText("adapter-health", `${label} · ${health.health.message ?? ""} · ${domVersion}`.trim());
+    const statusLabel = { healthy: "正常", degraded: "降级", unhealthy: "异常" }[health.health.status];
+    note = `${statusLabel} · ${health.health.message ?? ""} · ${health.health.dom_version ?? ""}`.trim();
+  } else if ("message" in health) {
+    note = health.message || "适配器体检失败";
   }
+  setText("adapter-health", note);
+  return { provider: response.provider, label, page: response.page, note };
+}
+
+/** 切标签页 / 页面加载完成后自动重识别（去抖，避免频繁打扰内容脚本）。 */
+function watchActiveTab(): void {
+  let timer: number | undefined;
+  const schedule = (): void => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = window.setTimeout(() => void detectActive(), 400);
+  };
+  chrome.tabs?.onActivated?.addListener(schedule);
+  chrome.tabs?.onUpdated?.addListener((_tabId, changeInfo) => {
+    if (changeInfo.status === "complete") schedule();
+  });
 }
 
 // ------------------------------------------------------------------ 采集
@@ -219,13 +266,26 @@ function renderAutoSaveStatus(progress: CrawlProgress): void {
   node.style.color = "#7ee787";
 }
 
+/**
+ * 「自动同步历史」：走后台静默同步（AKC/SYNC_HISTORY_NOW）。
+ *
+ * 以前走的是导航式遍历（AKC/CRAWL_START）——后台会在这个标签页里**逐个打开每个
+ * 历史会话**，页面疯狂跳转、既卡顿又有平台账号风控风险。现在改为内容脚本同源
+ * 抓取会话页并离线解析，页面完全不动；去重、节流、重试次数与连续失败熔断都在后台。
+ */
 async function startCrawl(): Promise<void> {
   clearError();
-  const response = await toBackground({ type: "AKC/CRAWL_START", limit: state.settings.batchSize * 10 });
+  const response = await toBackground({ type: "AKC/SYNC_HISTORY_NOW" });
   if (!response.ok) {
+    // 「刚同步过」「已有任务在进行中」这类不是故障：给提示而不是红色错误横幅
+    if (response.code === "SYNC_NOT_STARTED") {
+      setText("sync-status", `未开始：${response.message}`);
+      return;
+    }
     showError(response.message, startCrawl);
     return;
   }
+  setText("sync-status", "后台静默同步已开始…（不跳转页面，可继续正常使用）");
   if ("crawl" in response) renderCrawlProgress(response.crawl);
 }
 
@@ -252,11 +312,16 @@ async function refreshCrawlStatus(): Promise<void> {
 // ------------------------------------------------------------------ 编译
 async function startCompile(conversationId: string): Promise<void> {
   clearError();
+  el<HTMLButtonElement>("btn-write-current").disabled = true;
   try {
     const job = await state.api.createCompileJob(conversationId);
-    await pollJob(job.id);
+    const finished = await pollJob(job.id);
+    // 记住本次产出的知识 id：「一键写入 Obsidian」只写这批，而不是全库重写一遍
+    state.lastCompileKnowledgeIds = collectCompileResult(finished);
+    el<HTMLButtonElement>("btn-write-current").disabled = state.lastCompileKnowledgeIds.length === 0;
     await refreshKnowledge();
     await autoWriteToObsidian();
+    renderWriteTarget();
   } catch (error) {
     showError(humanizeError(error), () => startCompile(conversationId));
   }
@@ -354,6 +419,145 @@ async function writeToObsidian(): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------------ 健康检查
+/**
+ * 「健康检查」：一次点掉四处不确定性，并把结论明确写出来。
+ *
+ * 以前这个按钮只是重新读一次平台，既没有加载态也没有结论，点了像没点。
+ * 现在依次检查后端服务 / Obsidian 库 / AI 编译配置 / 当前页面适配器，
+ * 逐项给出结果，无异常也明确说"全部正常"。
+ */
+async function runHealthCheck(): Promise<void> {
+  const button = el<HTMLButtonElement>("btn-health");
+  button.disabled = true;
+  setText("health-result", "检查中…");
+  clearError();
+
+  const lines: string[] = [];
+  let problems = 0;
+
+  // 1) 后端服务
+  try {
+    const health = await state.api.health();
+    lines.push(`后端服务 ${health.status === "ok" ? "正常" : "异常"}（v${health.version}）`);
+    if (health.status !== "ok") problems += 1;
+  } catch (error) {
+    lines.push(`后端服务不可达：${humanizeError(error)}`);
+    problems += 1;
+  }
+
+  // 2) Obsidian 库
+  try {
+    const vault = await state.api.obsidianStatus();
+    state.vault = vault;
+    lines.push(
+      vault.configured
+        ? `Obsidian 库已连接（${vault.vault_path} · 知识目录 ${vault.knowledge_folder}）`
+        : "Obsidian 库未连接（双击 scripts\\windows\\set-vault.bat 选择即可）",
+    );
+    if (!vault.configured) problems += 1;
+    renderWriteTarget();
+  } catch (error) {
+    lines.push(`Obsidian 状态读取失败：${humanizeError(error)}`);
+    problems += 1;
+  }
+
+  // 3) AI 编译配置
+  try {
+    const llm = await state.api.llmStatus();
+    lines.push(
+      llm.llm_enabled && llm.llm_model
+        ? `AI 编译已启用（${llm.llm_provider ?? "unknown"} / ${llm.llm_model}）`
+        : "AI 编译未配置（只会保存原始对话，不会生成知识笔记）",
+    );
+    if (!llm.llm_enabled) problems += 1;
+  } catch (error) {
+    lines.push(`AI 编译状态读取失败：${humanizeError(error)}`);
+    problems += 1;
+  }
+
+  // 4) 当前页面适配器（顺带把平台识别刷新成最新的）
+  const detected = await detectActive();
+  lines.push(
+    detected.provider
+      ? `当前页面 ${detected.label}${detected.page === "conversation" ? "（会话页）" : "（非会话详情页）"} · 适配器${detected.note}`
+      : `当前页面未识别到受支持平台（${detected.note}）`,
+  );
+  if (!detected.provider) problems += 1;
+
+  const summary = problems === 0 ? "全部正常" : `发现 ${problems} 项需要处理`;
+  setText("health-result", `${summary}：${lines.join("；")}`);
+  if (problems > 0) {
+    showError(`${summary}：${lines.join("；")}`, runHealthCheck);
+  }
+
+  button.disabled = false;
+}
+
+// ------------------------------------------------------------------ 一键写入
+/** 显示本次编译结果的写入目标（让用户知道文件会落到哪里）。 */
+function renderWriteTarget(): void {
+  const node = el("write-target");
+  if (!state.vault?.configured) {
+    node.textContent = "Obsidian 库未连接：先双击 scripts\\windows\\set-vault.bat 连接，再写入。";
+    return;
+  }
+  const base = `${state.vault.vault_path}\\${state.vault.knowledge_folder}`;
+  if (state.lastCompileKnowledgeIds.length === 0) {
+    node.textContent = `写入目标：${base}\\<主题域>\\（先「保存 + 编译」一次，这里即可一键写入）`;
+    return;
+  }
+  node.textContent = `本次编译 ${state.lastCompileKnowledgeIds.length} 条 · 写入目标：${base}\\<主题域>\\`;
+}
+
+/** 从编译任务结果里取出本次产出的知识 id。 */
+function collectCompileResult(job: JobView): string[] {
+  const raw = job.result?.knowledge_ids;
+  if (!Array.isArray(raw)) return [];
+  return raw.map(String).filter(Boolean);
+}
+
+/** 一键写入 Obsidian：只写本次编译结果，失败自动重试 2 次。 */
+async function writeCurrentToObsidian(): Promise<void> {
+  clearError();
+  const button = el<HTMLButtonElement>("btn-write-current");
+  const ids = state.lastCompileKnowledgeIds;
+  if (ids.length === 0) {
+    setText("write-target", "还没有本次编译结果：先点「保存 + 编译」，再一键写入。");
+    return;
+  }
+  if (!state.vault?.configured) {
+    showError("Obsidian 库未连接：先双击 scripts\\windows\\set-vault.bat 连接一次。", writeCurrentToObsidian);
+    return;
+  }
+
+  button.disabled = true;
+  const original = "一键写入 Obsidian";
+  button.textContent = "写入中…";
+  try {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const result = await state.api.syncObsidian({ knowledge_ids: ids });
+        const skipped = result.skipped.length ? ` · 跳过 ${result.skipped.length} 个（冲突，未覆盖你的手工修改）` : "";
+        setText(
+          "write-target",
+          `已写入 ${result.written.length} 个文件到 ${result.vault_path}${skipped}`,
+        );
+        setText("sync-status", `已写入 ${result.written.length} 个文件${skipped}`);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+      }
+    }
+    showError(`写入 Obsidian 失败（已重试 2 次）：${humanizeError(lastError)}`, writeCurrentToObsidian);
+  } finally {
+    button.textContent = original;
+    button.disabled = false;
+  }
+}
+
 // ------------------------------------------------------------------ 错误映射
 function humanizeError(error: unknown): string {
   if (error instanceof OfflineError) return error.message;
@@ -366,11 +570,12 @@ function humanizeError(error: unknown): string {
 function wire(): void {
   el("btn-save").addEventListener("click", () => void saveCurrent(false));
   el("btn-save-compile").addEventListener("click", () => void saveCurrent(true));
-  el("btn-health").addEventListener("click", () => void detectProvider());
+  el("btn-health").addEventListener("click", () => void runHealthCheck());
   el("btn-load-history").addEventListener("click", () => void loadHistory());
   el("btn-crawl").addEventListener("click", () => void startCrawl());
   el("btn-crawl-cancel").addEventListener("click", () => void cancelCrawl());
   el("btn-write-obsidian").addEventListener("click", () => void writeToObsidian());
+  el("btn-write-current").addEventListener("click", () => void writeCurrentToObsidian());
   el("btn-retry").addEventListener("click", () => {
     if (state.lastAction) void state.lastAction();
   });
@@ -385,16 +590,21 @@ async function boot(): Promise<void> {
   });
   wire();
   subscribeProgress();
+  // 切标签页 / 页面加载完成后自动重识别平台：面板显示的永远是"用户现在看着的页面"
+  watchActiveTab();
   // 历史模块自动加载：打开面板就能看到全部已采集会话，不用再点「加载历史」。
   // 失败静默——面板刚开就弹红条只会吓到用户，点手动加载时自然会看到原因。
   void loadHistory({ silent: true }).catch(() => {});
-  await detectProvider();
+  await detectActive();
   try {
     await state.api.health();
   } catch (error) {
     showError(humanizeError(error), boot);
     return;
   }
+  // 写入目标提示需要知道库在哪；拿不到也不阻塞面板
+  state.vault = await state.api.obsidianStatus().catch(() => null);
+  renderWriteTarget();
   await refreshCrawlStatus();
   await refreshKnowledge();
 }
