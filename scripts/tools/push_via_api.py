@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from typing import Any
@@ -65,15 +66,59 @@ def commit_meta(commit: str) -> dict[str, Any]:
     }
 
 
+def resolve_commits(base_sha: str) -> list[str]:
+    """确定要推送的本地提交列表。
+
+    ``base_sha`` 是**远端**的 sha，本地对象库里通常不存在（由 API 生成），
+    因此 ``rev-list base..HEAD`` 会失败；此时退回上次推送时记录的本地上次 HEAD。
+    """
+    try:
+        return git("rev-list", "--reverse", f"{base_sha}..HEAD").split()
+    except subprocess.CalledProcessError:
+        state = read_state()
+        local_base = state.get("local_head")
+        if local_base:
+            try:
+                commits = git("rev-list", "--reverse", f"{local_base}..HEAD").split()
+                print(f"base sha 本地不存在，改用上次推送的本地上次 HEAD {local_base[:7]}")
+                return commits
+            except subprocess.CalledProcessError:
+                pass
+        raise SystemExit(
+            "无法自动确定待推送提交：base sha 不在本地对象库中。\n"
+            "请显式传入要推送的本地 commit sha 列表，或用 --local-base 指定本地上次推送的 HEAD。"
+        ) from None
+
+
+def state_path() -> str:
+    return os.path.join(git("rev-parse", "--git-dir").strip(), "akc-push-state.json")
+
+
+def read_state() -> dict[str, str]:
+    try:
+        with open(state_path(), encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(local_head: str, remote_head: str) -> None:
+    with open(state_path(), "w", encoding="utf-8") as handle:
+        json.dump({"local_head": local_head, "remote_head": remote_head}, handle, indent=2)
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) < 4:
+    if len(argv) < 3:
         print(__doc__)
         return 2
     token, base_sha = argv[1], argv[2]
     commits = argv[3:]
-    if not commits:
-        # 不指定时自动展开 base..HEAD 的全部提交 —— 只传 HEAD 会静默漏掉中间提交
-        commits = git("rev-list", "--reverse", f"{base_sha}..HEAD").split()
+    if not commits or commits[0] == "--local-base":
+        local_base = commits[1] if commits else None
+        if local_base:
+            commits = git("rev-list", "--reverse", f"{local_base}..HEAD").split()
+        else:
+            commits = resolve_commits(base_sha)
         print(f"自动展开待推送提交 {len(commits)} 个")
     headers = {**HEADERS, "Authorization": f"Bearer {token}"}
 
@@ -131,6 +176,7 @@ def main(argv: list[str]) -> int:
         if r.status_code != 200:
             print(f"ref 更新失败: {r.status_code} {r.text[:200]}")
             return 1
+        write_state(git("rev-parse", "HEAD").strip(), current)
         print(json.dumps({"new_head": current}, ensure_ascii=False))
     return 0
 
