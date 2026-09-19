@@ -174,7 +174,8 @@ RAW ──▶ CANDIDATE ──▶ REVIEW ──▶ VERIFIED ──▶ ARCHIVED
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/usage.md](docs/usage.md) | **首次上手指南**：启动 → 加载扩展 → 采集 → 编译 → 写入 → 审核 |
+| [docs/quickstart-chrome.md](docs/quickstart-chrome.md) | **Chrome 用户照着点就行**（5 分钟，4 步） |
+| [docs/usage.md](docs/usage.md) | 完整使用指南：启动 → 加载扩展 → 采集 → 编译 → 写入 → 审核 |
 | [docs/architecture.md](docs/architecture.md) | 分层架构、决策记录、数据流 |
 | [docs/data-model.md](docs/data-model.md) | Universal Schema、表结构、完整性约束 |
 | [docs/api.md](docs/api.md) | REST API 全量契约与错误结构 |
