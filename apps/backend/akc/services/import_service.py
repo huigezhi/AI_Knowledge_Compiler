@@ -17,6 +17,7 @@ from akc.db.models import Conversation
 from akc.logging_setup import log_event
 from akc.repositories import audit, conversation as conv_repo, message as msg_repo, provider
 from akc.repositories import job as job_repo
+from akc.compiler.prompts import EXTRACTOR_PROMPT_VERSION
 from akc.services import obsidian
 from akc.services.hasher import content_hash
 from akc.services.normalizer import normalize_conversation
@@ -105,7 +106,8 @@ def import_conversation(
             job_id=_new_id("job"),
             job_type="COMPILE_CONVERSATION",
             idempotency_key="|".join(
-                ["COMPILE_CONVERSATION", conversation.id, "extractor-v1", settings.llm_model or "-"]
+                ["COMPILE_CONVERSATION", conversation.id, EXTRACTOR_PROMPT_VERSION,
+                 settings.llm_model or "-", conv["content_hash"]]
             ),
             payload={"conversation_id": conversation.id},
             max_attempts=settings.job_max_attempts,

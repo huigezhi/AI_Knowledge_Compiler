@@ -4,37 +4,57 @@
   "title": "CompilerOutput",
   "description": "Claude Knowledge Compiler 的结构化输出契约（需求文档 §9.3）。所有输出必须通过本 Schema 校验后才允许落库。",
   "type": "object",
-  "required": ["items"],
+  "required": [
+    "items"
+  ],
   "additionalProperties": false,
   "properties": {
     "items": {
       "type": "array",
-      "items": { "$ref": "#/$defs/KnowledgeItem" }
+      "items": {
+        "$ref": "#/$defs/KnowledgeItem"
+      }
     },
     "entities": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Entity" }
+      "items": {
+        "$ref": "#/$defs/Entity"
+      }
     },
     "relations": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Relation" }
+      "items": {
+        "$ref": "#/$defs/Relation"
+      }
     },
     "contradictions": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Contradiction" }
+      "items": {
+        "$ref": "#/$defs/Contradiction"
+      }
     },
     "notes": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   },
   "$defs": {
     "KnowledgeItem": {
       "type": "object",
-      "required": ["title", "type", "summary", "source_message_ids"],
+      "required": [
+        "title",
+        "type",
+        "summary",
+        "source_message_ids"
+      ],
       "additionalProperties": false,
       "properties": {
-        "title": { "type": "string", "minLength": 1 },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
         "type": {
           "enum": [
             "fact",
@@ -47,52 +67,145 @@
             "opinion"
           ]
         },
-        "summary": { "type": "string", "minLength": 1 },
-        "body_markdown": { "type": "string" },
+        "domain": {
+          "description": "主题域分类，决定知识库一级目录",
+          "enum": [
+            "编程技术",
+            "金融投资",
+            "休闲旅游",
+            "工作职场",
+            "学习成长",
+            "生活健康",
+            "其他"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body_markdown": {
+          "type": "string"
+        },
         "source_message_ids": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
-        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "needs_verification": { "type": "boolean" },
-        "entities": { "type": "array", "items": { "type": "string" } },
-        "candidate_existing_knowledge_ids": { "type": "array", "items": { "type": "string" } },
-        "merge_action": { "enum": ["create", "update", "merge", "ignore", "review"] }
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "needs_verification": {
+          "type": "boolean"
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "candidate_existing_knowledge_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "merge_action": {
+          "enum": [
+            "create",
+            "update",
+            "merge",
+            "ignore",
+            "review"
+          ]
+        }
       }
     },
     "Entity": {
       "type": "object",
-      "required": ["name", "type"],
+      "required": [
+        "name",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "type": { "type": "string", "minLength": 1 },
-        "canonical_name": { "type": "string" }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "canonical_name": {
+          "type": "string"
+        }
       }
     },
     "Relation": {
       "type": "object",
-      "required": ["source", "relation", "target"],
+      "required": [
+        "source",
+        "relation",
+        "target"
+      ],
       "additionalProperties": false,
       "properties": {
-        "source": { "type": "string", "minLength": 1 },
-        "relation": { "type": "string", "minLength": 1 },
-        "target": { "type": "string", "minLength": 1 },
-        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
     "Contradiction": {
       "type": "object",
-      "required": ["field", "existing", "new"],
+      "required": [
+        "field",
+        "existing",
+        "new"
+      ],
       "additionalProperties": false,
       "properties": {
-        "knowledge_id": { "type": "string" },
-        "field": { "type": "string", "minLength": 1 },
-        "existing": { "type": "string" },
-        "new": { "type": "string" },
-        "severity": { "enum": ["low", "medium", "high"] },
-        "reason": { "type": "string" }
+        "knowledge_id": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "existing": {
+          "type": "string"
+        },
+        "new": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
       }
     }
   }

@@ -145,11 +145,11 @@ async function saveCurrent(withCompile: boolean): Promise<void> {
   }
 }
 
-async function loadHistory(): Promise<void> {
+async function loadHistory(options: { silent?: boolean } = {}): Promise<void> {
   clearError();
   const response = await toBackground({ type: "AKC/LIST_CONVERSATIONS" });
   if (!response.ok) {
-    showError(response.message, loadHistory);
+    if (!options.silent) showError(response.message, loadHistory);
     return;
   }
   if (!("items" in response)) return;
@@ -385,6 +385,9 @@ async function boot(): Promise<void> {
   });
   wire();
   subscribeProgress();
+  // 历史模块自动加载：打开面板就能看到全部已采集会话，不用再点「加载历史」。
+  // 失败静默——面板刚开就弹红条只会吓到用户，点手动加载时自然会看到原因。
+  void loadHistory({ silent: true }).catch(() => {});
   await detectProvider();
   try {
     await state.api.health();

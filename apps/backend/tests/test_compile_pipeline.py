@@ -253,3 +253,56 @@ def test_non_truncated_invalid_output_is_not_retried() -> None:
     with pytest.raises(ClaudeOutputInvalidError):
         run_extraction(client, {"provider": "deepseek", "title": "t", "messages": []}, [])
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------- 主题域与汇聚
+def test_domain_coerced_into_allowed_set() -> None:
+    from akc.compiler.extractor import _coerce_domain
+
+    assert _coerce_domain("金融投资") == "金融投资"
+    assert _coerce_domain("随便编的") == "其他"
+    assert _coerce_domain(None) == "其他"
+    assert _coerce_domain("") == "其他"
+
+
+def test_schema_accepts_domain_and_rejects_unknown() -> None:
+    payload = _output()
+    payload["items"][0]["domain"] = "金融投资"
+    validate_compiler_output(payload)
+
+    bad = _output()
+    bad["items"][0]["domain"] = "不存在的域"
+    with pytest.raises(Exception):
+        validate_compiler_output(bad)
+
+
+def test_content_change_enqueues_new_compile(session: Session, settings: Settings) -> None:
+    """编译幂等键必须含内容哈希：内容变了要重新编译，内容不变才幂等跳过。"""
+    from akc.repositories import job as job_repo
+    from akc.services.import_service import import_conversation
+
+    settings.auto_compile = True
+    base = {
+        "id": "conv_key",
+        "provider": "deepseek",
+        "provider_conversation_id": "ext-key",
+        "title": "键测试",
+        "messages": [
+            {"id": "m1", "role": "user", "sequence": 0, "content": [{"type": "text", "text": "v1"}]}
+        ],
+        "content_hash": "sha256:" + "1" * 64,
+    }
+    import_conversation(session, dict(base), settings=settings)
+
+    changed = dict(base)
+    changed["content_hash"] = "sha256:" + "2" * 64
+    changed["messages"] = [
+        {"id": "m1", "role": "user", "sequence": 0, "content": [{"type": "text", "text": "v2 长一点"}]}
+    ]
+    import_conversation(session, changed, settings=settings)
+
+    # 相同内容重复导入 -> 不再新增编译任务
+    import_conversation(session, dict(base), settings=settings)
+
+    compiles = [j for j in job_repo.list_jobs(session, limit=100) if j.job_type == "COMPILE_CONVERSATION"]
+    assert len(compiles) == 2

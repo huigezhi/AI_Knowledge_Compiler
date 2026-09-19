@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from akc.compiler.client import ClaudeClient, ClaudeSettings
 from akc.compiler.extractor import run_extraction
+from akc.compiler.prompts import EXTRACTOR_PROMPT_VERSION
 from akc.config import COMPILER_VERSION, Settings
 from akc.errors import AppError, ClaudeRequestError, LLMDisabledError
 from akc.logging_setup import log_event
@@ -29,7 +30,7 @@ from akc.repositories import (
     sync_run as run_repo,
 )
 from akc.repositories import message as msg_repo
-from akc.services.merge_planner import plan_merge, select_best_match
+from akc.services.merge_planner import _RELATED_THRESHOLD, plan_merge, select_best_match, text_similarity
 from akc.services.search import related_knowledge_for_conversation
 
 _REVIEW_CONFIDENCE_THRESHOLD = 0.6
@@ -99,7 +100,7 @@ def compile_conversation(
         run_id=_new_id("crun"),
         conversation_id=conversation_id,
         model=settings.llm_model or "",
-        prompt_version="extractor-v1",
+        prompt_version=EXTRACTOR_PROMPT_VERSION,
         compiler_version=COMPILER_VERSION,
         adapter_version=conv_row.adapter_version,
         job_id=job_id,
@@ -135,7 +136,24 @@ def compile_conversation(
             )
             continue
 
+        title = str(item.get("title") or "")
         best, score = select_best_match(item, pool)
+        if best is None or score < _RELATED_THRESHOLD:
+            # 候选池按会话标题检索，覆盖面有限；再用**候选标题本身**搜一次全库。
+            # 否则"同主题的新会话"永远找不到早前的知识，只会不停建重复条目——
+            # 这正是"相似知识点要合并到一起"的关键一步。
+            seen_ids = {str(p.get("id") or "") for p in pool}
+            extra_pool = [
+                {**kn_repo.to_dict(cand), "source_message_ids": []}
+                for cand in kn_repo.search_fts(session, title, limit=5)
+                if str(cand.id) not in seen_ids
+                and cand.status in ("verified", "candidate", "review", "merged")
+            ]
+            if extra_pool:
+                alt, alt_score = select_best_match(item, extra_pool)
+                if alt is not None and alt_score > score:
+                    best, score = alt, alt_score
+
         decision = (
             plan_merge(
                 item,
@@ -146,7 +164,6 @@ def compile_conversation(
             else None
         )
 
-        title = str(item.get("title") or "")
         confidence = float(item.get("confidence") or 0.5)
         needs_review = bool(item.get("needs_verification")) or confidence < _REVIEW_CONFIDENCE_THRESHOLD
         declared_action = str(item.get("merge_action") or "create").lower()
@@ -159,6 +176,7 @@ def compile_conversation(
                 slug=_slug_for(title),
                 title=title,
                 knowledge_type=str(item.get("type") or "fact"),
+                domain=str(item.get("domain") or "其他"),
                 summary=str(item.get("summary") or ""),
                 markdown=str(item.get("body_markdown") or item.get("summary") or ""),
                 confidence=confidence,
@@ -166,7 +184,7 @@ def compile_conversation(
                 topics=list(item.get("entities") or []),
                 entities=list(item.get("entities") or []),
                 status=status,
-                prompt_version="extractor-v1",
+                prompt_version=EXTRACTOR_PROMPT_VERSION,
                 model=settings.llm_model,
             )
             kn_repo.link_sources(
@@ -211,6 +229,16 @@ def compile_conversation(
             target = kn_repo.get(session, decision.existing_knowledge_id or "")
             if target is None:
                 continue
+            # 合并不再只是"把来源挂上去"：把候选里**确实新增的信息**折叠进已有笔记，
+            # 真正做到"相似知识点合并成一条"。语义几乎重复（相似度 >= 0.75）时不追加，
+            # 避免同一句话在正文里堆两遍。
+            cand_summary = str(item.get("summary") or "").strip()
+            if (
+                cand_summary
+                and text_similarity(cand_summary, target.summary or target.markdown or "") < 0.75
+            ):
+                folded = f"{(target.markdown or '').rstrip()}\n\n## 补充\n\n{cand_summary}"
+                kn_repo.update_content(session, target, markdown=folded)
             kn_repo.link_sources(
                 session,
                 knowledge_id=target.id,
@@ -229,13 +257,14 @@ def compile_conversation(
                 slug=_slug_for(title),
                 title=title,
                 knowledge_type=str(item.get("type") or "fact"),
+                domain=str(item.get("domain") or "其他"),
                 summary=str(item.get("summary") or ""),
                 markdown=str(item.get("body_markdown") or ""),
                 confidence=confidence,
                 needs_verification=True,
                 entities=list(item.get("entities") or []),
                 status="review",
-                prompt_version="extractor-v1",
+                prompt_version=EXTRACTOR_PROMPT_VERSION,
                 model=settings.llm_model,
             )
             kn_repo.link_sources(
@@ -275,7 +304,7 @@ def compile_conversation(
             "stats": stats,
             "decisions": decisions,
             "model": settings.llm_model,
-            "prompt_version": "extractor-v1",
+            "prompt_version": EXTRACTOR_PROMPT_VERSION,
         },
     )
     audit.record(

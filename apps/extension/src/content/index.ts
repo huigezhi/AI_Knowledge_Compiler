@@ -10,6 +10,7 @@
 import type { AdapterHealth, Conversation, ConversationSummary, ProviderAdapter } from "@akc/schema";
 import { adapterForUrl } from "@/adapters/registry";
 import { logger } from "@/shared/logger";
+import { fetchRemoteConversation } from "@/shared/remote-conversation";
 import { isMessage, type Message, type MessageResponse } from "@/shared/messaging";
 import { loadSettings } from "@/shared/settings";
 
@@ -53,6 +54,12 @@ async function handle(message: Message): Promise<MessageResponse> {
     }
     case "AKC/FETCH_CURRENT": {
       const conversation: Conversation = await currentAdapter().fetchCurrentConversation();
+      return ok({ conversation });
+    }
+    case "AKC/FETCH_REMOTE": {
+      // 历史会话免跳转采集：同源抓取会话页 HTML 并离线解析，
+      // 背景流程不需要真的把标签页导航过去（用户零感知）
+      const conversation: Conversation = await fetchRemoteConversation(message.url);
       return ok({ conversation });
     }
     case "AKC/HEALTH_CHECK": {

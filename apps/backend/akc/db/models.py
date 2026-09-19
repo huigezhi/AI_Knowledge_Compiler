@@ -149,6 +149,9 @@ class Knowledge(Base, TimestampMixin):
     obsidian_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
     model: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 主题域（编程技术 / 金融投资 / 休闲旅游 / 工作职场 / 学习成长 / 生活健康 / 其他），
+    # 决定 Obsidian 侧 03_Knowledge/<domain>/ 的一级目录
+    domain: Mapped[str] = mapped_column(String, default="其他", nullable=False, server_default="其他")
 
 
 class KnowledgeSource(Base):

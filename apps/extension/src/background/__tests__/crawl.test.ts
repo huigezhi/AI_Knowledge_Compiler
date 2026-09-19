@@ -27,12 +27,20 @@ vi.stubGlobal("chrome", {
   runtime: {
     onMessage: { addListener: (fn: Listener) => listeners.push(fn) },
     onInstalled: { addListener: () => undefined },
+    onStartup: { addListener: () => undefined },
     getManifest: () => ({ version: "0.1.0" }),
     sendMessage: runtimeSendMessage,
     lastError: undefined,
   },
-  tabs: { query: tabsQuery, get: tabsGet, update: tabsUpdate, sendMessage: tabsSendMessage },
+  tabs: {
+    query: tabsQuery,
+    get: tabsGet,
+    update: tabsUpdate,
+    sendMessage: tabsSendMessage,
+    onUpdated: { addListener: () => undefined },
+  },
   sidePanel: { open: vi.fn(), setPanelBehavior: vi.fn() },
+  alarms: { onAlarm: { addListener: () => undefined }, create: vi.fn(), get: vi.fn(async () => undefined), clear: vi.fn() },
 });
 vi.stubGlobal("fetch", fetchMock);
 

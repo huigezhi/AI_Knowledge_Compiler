@@ -25,6 +25,7 @@ WRITABLE_KEYS = {
     "vault_knowledge_folder",
     "vault_inbox_folder",
     "auto_compile",
+    "auto_write_obsidian",
     "auto_merge_verified",
     "require_review_for_conflicts",
     "log_level",

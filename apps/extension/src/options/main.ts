@@ -20,6 +20,8 @@ function fill(settings: ExtensionSettings): void {
   el<HTMLInputElement>("crawl-item-timeout").value = String(settings.crawlItemTimeoutSeconds);
   el<HTMLInputElement>("write-raw").checked = settings.writeRawToObsidian;
   el<HTMLInputElement>("auto-compile").checked = settings.autoCompile;
+  el<HTMLInputElement>("history-auto-sync").checked = settings.historyAutoSync;
+  el<HTMLInputElement>("history-sync-interval").value = String(settings.historySyncIntervalMinutes);
   el<HTMLSelectElement>("log-level").value = settings.logLevel;
 }
 
@@ -30,11 +32,16 @@ function collect(): Partial<ExtensionSettings> {
     batchSize: Number(el<HTMLInputElement>("batch-size").value) || 20,
     autoSave: el<HTMLInputElement>("auto-save").checked,
     // 去抖时长必须 >=1 秒：0 会让流式输出的每一帧都触发一次采集
-    autoSaveDelaySeconds: Math.max(1, Number(el<HTMLInputElement>("auto-save-delay").value) || 15),
+    autoSaveDelaySeconds: Math.max(1, Number(el<HTMLInputElement>("auto-save-delay").value) || 5),
     crawlSkipExisting: el<HTMLInputElement>("crawl-skip-existing").checked,
     crawlItemTimeoutSeconds: Math.min(120, Math.max(5, Number(el<HTMLInputElement>("crawl-item-timeout").value) || 20)),
     writeRawToObsidian: el<HTMLInputElement>("write-raw").checked,
     autoCompile: el<HTMLInputElement>("auto-compile").checked,
+    historyAutoSync: el<HTMLInputElement>("history-auto-sync").checked,
+    historySyncIntervalMinutes: Math.min(
+      720,
+      Math.max(5, Number(el<HTMLInputElement>("history-sync-interval").value) || 15),
+    ),
     logLevel: el<HTMLSelectElement>("log-level").value as ExtensionSettings["logLevel"],
   };
 }

@@ -94,6 +94,9 @@ class Settings(BaseSettings):
 
     # --- compile policy ----------------------------------------------------
     auto_compile: bool = False
+    # 编译成功后自动把产出的知识写入 Obsidian vault（无需扩展再调 /obsidian/sync）。
+    # 这是"全程无人工干预"链路的最后一环：采集 -> 入库 -> 编译 -> 落盘。
+    auto_write_obsidian: bool = False
     auto_merge_verified: bool = False
     require_review_for_conflicts: bool = True
 

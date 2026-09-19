@@ -34,6 +34,7 @@ export type Message =
   | { type: "AKC/DETECT_PAGE"; tabId?: number }
   | { type: "AKC/LIST_CONVERSATIONS"; tabId?: number; limit?: number }
   | { type: "AKC/FETCH_CURRENT"; tabId?: number }
+  | { type: "AKC/FETCH_REMOTE"; url: string; tabId?: number }
   | { type: "AKC/HEALTH_CHECK"; tabId?: number }
   | { type: "AKC/OPEN_SIDE_PANEL"; tabId?: number }
   // ---- 自动保存（content script 检测到变化后上报，由后台入库）----

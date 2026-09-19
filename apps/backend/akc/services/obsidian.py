@@ -36,8 +36,14 @@ class VaultLayout:
     def raw_dir(self, provider: str) -> Path:
         return self.vault_path / self.raw_folder / _provider_folder(provider)
 
-    def knowledge_dir(self, knowledge_type: str) -> Path:
-        return self.vault_path / self.knowledge_folder / _category_folder(knowledge_type)
+    def knowledge_dir(self, domain: str) -> Path:
+        """知识一级目录 = 主题域（编程技术 / 金融投资 / 休闲旅游 / 工作……）。
+
+        需求变更：以前按 knowledge_type 分目录（Concepts / Methods），用户实际
+        想要的是"按主题找知识"——旅游的去旅游文件夹、编程的去编程文件夹。
+        类型信息保留在 frontmatter 的 knowledge_type 里。
+        """
+        return self.vault_path / self.knowledge_folder / _domain_folder(domain)
 
 
 def _provider_folder(provider: str) -> str:
@@ -50,17 +56,10 @@ def _provider_folder(provider: str) -> str:
     }.get(provider.lower(), provider.title() or "Unknown")
 
 
-def _category_folder(knowledge_type: str) -> str:
-    return {
-        "concept": "Concepts",
-        "method": "Methods",
-        "heuristic": "Methods",
-        "decision": "Decisions",
-        "fact": "Concepts",
-        "question": "Concepts",
-        "hypothesis": "Concepts",
-        "opinion": "Concepts",
-    }.get(knowledge_type.lower(), "Concepts")
+def _domain_folder(domain: str) -> str:
+    """主题域 → 目录名：只保留安全字符，空值落「其他」。"""
+    text = _INVALID_CHARS.sub("", str(domain or "").strip())
+    return text or "其他"
 
 
 def slugify(value: str, *, max_length: int = 80) -> str:
@@ -274,3 +273,77 @@ def resolve_vault(layout: VaultLayout | None) -> VaultLayout:
             details={"hint": "set AKC_VAULT_PATH or update /api/v1/settings"},
         )
     return layout
+
+
+# ------------------------------------------------------------------ 批量同步
+def wiki_link_for_message(session, message_id: str) -> str | None:
+    """把 Raw Message 映射为其所属会话的 Wiki Link（保持溯源可点击）。"""
+    from akc.repositories import conversation as conv_repo
+    from akc.repositories import message as msg_repo
+
+    message = msg_repo.get(session, message_id)
+    if message is None:
+        return None
+    conv = conv_repo.get(session, message.conversation_id)
+    if conv is None:
+        return None
+    date_part = (conv.created_at or conv.updated_at).strftime("%Y-%m-%d")
+    return f"[[{conv.provider_id.title()} - {conv.title} - {date_part}]]"
+
+
+def sync_knowledge(session, settings, knowledge_ids: list[str]) -> dict[str, list]:
+    """把一批知识实体落盘为 Obsidian Markdown。
+
+    路由（手动同步）与编译任务（自动落盘）共用这一份逻辑，避免两处维护。
+    单条失败不拖垮整批，失败条目进 ``skipped``（含原因）。
+    """
+    from akc.repositories import knowledge as kn_repo
+
+    layout = VaultLayout(
+        vault_path=settings.vault_path,
+        raw_folder=settings.vault_raw_folder,
+        knowledge_folder=settings.vault_knowledge_folder,
+        inbox_folder=settings.vault_inbox_folder,
+    )
+    written: list[dict] = []
+    skipped: list[dict] = []
+
+    for knowledge_id in knowledge_ids:
+        item = kn_repo.get(session, knowledge_id)
+        if item is None:
+            skipped.append({"id": knowledge_id, "reason": "knowledge not found"})
+            continue
+        source_message_ids = [link.message_id for link in kn_repo.sources_for(session, knowledge_id)]
+        source_links = []
+        for mid in source_message_ids:
+            link = wiki_link_for_message(session, mid)
+            if link:
+                source_links.append(link)
+        markdown = build_knowledge_markdown(
+            title=item.title,
+            knowledge_type=item.knowledge_type,
+            status=item.status,
+            summary=item.summary,
+            body_markdown=item.markdown,
+            confidence=item.confidence,
+            topics=list(item.topics_json or []),
+            entities=list(item.entities_json or []),
+            source_links=source_links,
+            created_at=item.created_at.isoformat() if item.created_at else "",
+            updated_at=item.updated_at.isoformat() if item.updated_at else "",
+            prompt_version=item.prompt_version,
+            model=item.model,
+            version=item.version,
+            compiler=item.model,
+        )
+        path = layout.knowledge_dir(item.domain) / f"{item.slug}.md"
+        try:
+            target, changed = write_markdown(path, markdown)
+        except Exception as exc:  # noqa: BLE001 - 单条失败不影响其它条目
+            skipped.append({"id": knowledge_id, "reason": str(exc)})
+            continue
+        item.obsidian_path = str(target)
+        written.append({"id": knowledge_id, "path": str(target), "changed": changed})
+
+    session.commit()
+    return {"written": written, "skipped": skipped}

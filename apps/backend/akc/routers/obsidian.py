@@ -11,8 +11,7 @@ from fastapi import APIRouter
 from sqlalchemy.orm import Session
 
 from akc.deps import SessionDep, SettingsDep
-from akc.errors import NotFoundError
-from akc.repositories import conversation as conv_repo, knowledge as kn_repo
+from akc.repositories import conversation as conv_repo
 from akc.schemas.api import ObsidianSyncRequest
 from akc.services import obsidian
 
@@ -39,48 +38,10 @@ def sync(
 
         raise ObsidianVaultNotConfiguredError("obsidian vault path is not configured")
 
-    layout = obsidian.VaultLayout(
-        vault_path=settings.vault_path,
-        raw_folder=settings.vault_raw_folder,
-        knowledge_folder=settings.vault_knowledge_folder,
-        inbox_folder=settings.vault_inbox_folder,
-    )
-    written: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
-
-    for knowledge_id in payload.knowledge_ids:
-        item = kn_repo.get(session, knowledge_id)
-        if item is None:
-            raise NotFoundError("knowledge not found", details={"id": knowledge_id})
-        source_message_ids = [
-            link.message_id for link in kn_repo.sources_for(session, knowledge_id)
-        ]
-        source_links = [_wiki_link(session, mid) for mid in source_message_ids]
-        markdown = obsidian.build_knowledge_markdown(
-            title=item.title,
-            knowledge_type=item.knowledge_type,
-            status=item.status,
-            summary=item.summary,
-            body_markdown=item.markdown,
-            confidence=item.confidence,
-            topics=list(item.topics_json or []),
-            entities=list(item.entities_json or []),
-            source_links=[link for link in source_links if link],
-            created_at=item.created_at.isoformat() if item.created_at else "",
-            updated_at=item.updated_at.isoformat() if item.updated_at else "",
-            prompt_version=item.prompt_version,
-            model=item.model,
-            version=item.version,
-            compiler=item.model,
-        )
-        path = layout.knowledge_dir(item.knowledge_type) / f"{item.slug}.md"
-        try:
-            target, changed = obsidian.write_markdown(path, markdown)
-        except Exception as exc:  # noqa: BLE001 - 单条失败不影响其它条目
-            skipped.append({"id": knowledge_id, "reason": str(exc)})
-            continue
-        item.obsidian_path = str(target)
-        written.append({"id": knowledge_id, "path": str(target), "changed": changed})
+    # 知识落盘统一走 services（编译任务的自动落盘也用同一份逻辑）
+    result = obsidian.sync_knowledge(session, settings, payload.knowledge_ids)
+    written = list(result["written"])
+    skipped = list(result["skipped"])
 
     for conversation_id in payload.conversation_ids:
         conv = conv_repo.get(session, conversation_id)
@@ -91,7 +52,12 @@ def sync(
         markdown = obsidian.build_raw_markdown(normalized)
         date_part = (conv.created_at or conv.updated_at).strftime("%Y-%m-%d")
         path = (
-            layout.raw_dir(conv.provider_id)
+            obsidian.VaultLayout(
+                vault_path=settings.vault_path,
+                raw_folder=settings.vault_raw_folder,
+                knowledge_folder=settings.vault_knowledge_folder,
+                inbox_folder=settings.vault_inbox_folder,
+            ).raw_dir(conv.provider_id)
             / f"{obsidian.slugify(conv.title)}-{date_part}.md"
         )
         try:
@@ -103,7 +69,7 @@ def sync(
         written.append({"id": conversation_id, "path": str(target), "changed": changed})
 
     session.commit()
-    return {"written": written, "skipped": skipped, "vault_path": str(layout.vault_path)}
+    return {"written": written, "skipped": skipped, "vault_path": str(settings.vault_path)}
 
 
 def _wiki_link(session: Session, message_id: str) -> str | None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import textwrap
 from typing import Any
 
-EXTRACTOR_PROMPT_VERSION = "extractor-v1"
+EXTRACTOR_PROMPT_VERSION = "extractor-v2"
 MERGE_PLANNER_PROMPT_VERSION = "merge-planner-v1"
 
 SYSTEM_PROMPT = textwrap.dedent(
@@ -40,6 +40,31 @@ SYSTEM_PROMPT = textwrap.dedent(
 
 TAXONOMY = "fact, concept, method, heuristic, decision, question, hypothesis, opinion"
 
+# 主题域（需求：知识库要按 编程 / 金融 / 旅游 / 工作 等主题分类落盘）。
+# extractor 每条 item 必须从中选一个；同时是 merge 目录划分与 schema 枚举的唯一来源。
+KNOWLEDGE_DOMAINS = [
+    "编程技术",
+    "金融投资",
+    "休闲旅游",
+    "工作职场",
+    "学习成长",
+    "生活健康",
+    "其他",
+]
+
+_EXTRACTION_INSTRUCTIONS = textwrap.dedent(
+    """
+    Consolidate the conversation above into durable knowledge.
+
+    核心原则：**汇聚，而不是罗列**。
+    - 通常整场对话只输出 1 条知识点：把同类、同主题的要点合并成一条结构化笔记
+      （用小节组织正文），绝不把每个细节拆成独立 item。
+    - 仅当对话确实横跨多个不同 <domains> 主题时才拆分，且最多 {max_items} 条。
+    - 与 <related_knowledge> 中已有知识相同的要点，直接并入对应条目
+      （merge_action=update/merge），不要重复创建。
+    """
+).strip()
+
 _EXTRACTOR_TEMPLATE = textwrap.dedent(
     """
     <conversation>
@@ -57,6 +82,8 @@ _EXTRACTOR_TEMPLATE = textwrap.dedent(
 
     <taxonomy>{taxonomy}</taxonomy>
 
+    <domains>{domains}</domains>
+
     <output_budget>
     - 最多 {max_items} 条 items；宁可把相近内容合并成一条，也不要逐条罗列。
     - 每条 summary 不超过 60 字；body_markdown 不超过 {max_body_chars} 字。
@@ -64,7 +91,7 @@ _EXTRACTOR_TEMPLATE = textwrap.dedent(
     - 总输出必须能一次性写完，绝不能因为长度被截断：宁少勿多。
     </output_budget>
 
-    Extract durable knowledge items from the conversation above.
+    {instructions}
 
     Output a single JSON object with this shape:
     {{
@@ -72,6 +99,7 @@ _EXTRACTOR_TEMPLATE = textwrap.dedent(
         {{
           "title": "string",
           "type": "{taxonomy_inline}",
+          "domain": "{domains_inline}",
           "summary": "string",
           "body_markdown": "string",
           "source_message_ids": ["m1"],
@@ -164,15 +192,15 @@ def build_extractor_prompt(
     related_knowledge: list[dict[str, Any]],
     *,
     max_chars: int = 50_000,
-    max_items: int = 6,
-    max_body_chars: int = 400,
+    max_items: int = 3,
+    max_body_chars: int = 600,
 ) -> str:
     """``max_items`` / ``max_body_chars`` 是**输出预算**。
 
     DeepSeek / Claude 的单次输出上限是硬性的（DeepSeek 为 8192 token），
-    而模型的默认倾向是"把每个细节都拆成一条知识"——`_debug` 里实测一轮就写满
-    8192 token 被截断，截断的 JSON 必然解析失败，于是任务永远失败。
-    与其事后补救，不如在 Prompt 里就把输出规模压到能一次写完。
+    而模型的默认倾向是"把每个细节都拆成一条知识"——实测一轮就写满 8192 token
+    被截断，截断的 JSON 必然解析失败，任务永远失败。
+    汇聚式抽取（见 ``_EXTRACTION_INSTRUCTIONS``）之后 1-3 条是常态，预算更宽裕。
     """
     return _EXTRACTOR_TEMPLATE.format(
         provider=conversation.get("provider", ""),
@@ -182,6 +210,9 @@ def build_extractor_prompt(
         related_knowledge=render_related_knowledge(related_knowledge),
         taxonomy=TAXONOMY,
         taxonomy_inline=TAXONOMY.replace(", ", "|"),
+        domains="、".join(KNOWLEDGE_DOMAINS),
+        domains_inline="|".join(KNOWLEDGE_DOMAINS),
+        instructions=_EXTRACTION_INSTRUCTIONS.format(max_items=max_items),
         max_items=max_items,
         max_body_chars=max_body_chars,
     )

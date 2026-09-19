@@ -21,10 +21,12 @@ vi.stubGlobal("chrome", {
   runtime: {
     onMessage: { addListener: (fn: Listener) => listeners.push(fn) },
     onInstalled: { addListener: () => undefined },
+    onStartup: { addListener: () => undefined },
     getManifest: () => ({ version: "0.1.0" }),
   },
-  tabs: { query: tabsQuery, sendMessage: tabsSendMessage },
+  tabs: { query: tabsQuery, sendMessage: tabsSendMessage, onUpdated: { addListener: () => undefined } },
   sidePanel: { open: sidePanelOpen, setPanelBehavior: vi.fn() },
+  alarms: { onAlarm: { addListener: () => undefined }, create: vi.fn(), get: vi.fn(async () => undefined), clear: vi.fn() },
 });
 
 await import("../index");

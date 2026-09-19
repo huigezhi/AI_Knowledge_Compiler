@@ -7,6 +7,7 @@ from typing import Any
 from akc.compiler.client import ClaudeClient
 from akc.compiler.prompts import (
     EXTRACTOR_PROMPT_VERSION,
+    KNOWLEDGE_DOMAINS,
     SYSTEM_PROMPT,
     build_extractor_prompt,
     build_merge_planner_prompt,
@@ -19,9 +20,8 @@ _MERGE_ACTIONS = {"create", "update", "merge", "ignore", "review"}
 
 
 # 输出预算梯次：先给足，被截断就逐档收紧，而不是直接判死。
-# 实测（DeepSeek，单次输出上限 8192 token）：默认 6 条 x 400 字已经够写，
-# 只有模型执意逐条罗列时才会掉到后面几档。
-_EXTRACTION_BUDGETS: tuple[tuple[int, int], ...] = ((6, 400), (3, 200), (2, 150))
+# 汇聚式抽取后通常 1 条就够；梯次里第 3 档是"整场对话压成 1 条"的兜底。
+_EXTRACTION_BUDGETS: tuple[tuple[int, int], ...] = ((3, 600), (2, 400), (1, 300))
 
 
 def run_extraction(
@@ -105,6 +105,12 @@ def run_merge_planning(
     }
 
 
+def _coerce_domain(value: Any) -> str:
+    """主题域归一：不在枚举里的值一律落「其他」，保证目录可控。"""
+    text = str(value or "").strip()
+    return text if text in KNOWLEDGE_DOMAINS else "其他"
+
+
 def _coerce(raw: dict[str, Any]) -> dict[str, Any]:
     """把模型输出收敛到 Schema 期望的形状（只做安全的结构补全，不改语义）。"""
     items: list[dict[str, Any]] = []
@@ -128,6 +134,7 @@ def _coerce(raw: dict[str, Any]) -> dict[str, Any]:
             {
                 "title": title,
                 "type": _coerce_type(item.get("type")),
+                "domain": _coerce_domain(item.get("domain")),
                 "summary": summary,
                 "body_markdown": str(item.get("body_markdown") or summary),
                 "source_message_ids": source_ids,

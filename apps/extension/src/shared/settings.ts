@@ -23,6 +23,13 @@ export interface ExtensionSettings {
   autoSave: boolean;
   /** 自动保存的去抖时长（秒）：连续输入期间不打断，停手这么久后才保存。 */
   autoSaveDelaySeconds: number;
+  /**
+   * 历史会话后台静默同步：不跳转页面、不打开侧边栏，由 Service Worker
+   * 定期（chrome.alarms）让平台页的内容脚本同域抓取会话页并解析入库。
+   */
+  historyAutoSync: boolean;
+  /** 历史静默同步的周期（分钟）。 */
+  historySyncIntervalMinutes: number;
   /** 自动遍历历史会话时，跳过后端已存在的会话（只补没采过的）。 */
   crawlSkipExisting: boolean;
   /** 单个历史会话的最长等待时间（秒），超时就跳过，避免卡死。 */
@@ -34,11 +41,15 @@ export interface ExtensionSettings {
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   backendUrl: "http://127.0.0.1:38127",
   authToken: "",
-  autoCompile: false,
+  // 全自动链路的默认值：采集即编译，用户零操作
+  autoCompile: true,
   writeRawToObsidian: true,
   batchSize: 20,
   autoSave: true,
-  autoSaveDelaySeconds: 15,
+  // 5 秒：比 15 秒更跟手，又不会在流式输出期间频繁打断
+  autoSaveDelaySeconds: 5,
+  historyAutoSync: true,
+  historySyncIntervalMinutes: 15,
   crawlSkipExisting: true,
   crawlItemTimeoutSeconds: 20,
   logLevel: "info",
@@ -71,8 +82,12 @@ async function storageSet(key: string, value: unknown): Promise<void> {
 }
 
 export async function loadSettings(): Promise<ExtensionSettings> {
-  const stored = await storageGet<Partial<ExtensionSettings>>(STORAGE_KEY);
-  return { ...DEFAULT_SETTINGS, ...(stored ?? {}) } as ExtensionSettings;
+  const stored = { ...((await storageGet<Partial<ExtensionSettings>>(STORAGE_KEY)) ?? {}) };
+  // 迁移：旧版默认 15 秒是"没改过"的标记，统一升到新的 5 秒默认值；
+  // 用户显式改过的其它值不受影响。
+  if (stored.autoSaveDelaySeconds === 15) delete stored.autoSaveDelaySeconds;
+  if (stored.autoCompile === false) delete stored.autoCompile;
+  return { ...DEFAULT_SETTINGS, ...stored } as ExtensionSettings;
 }
 
 export async function saveSettings(patch: Partial<ExtensionSettings>): Promise<ExtensionSettings> {

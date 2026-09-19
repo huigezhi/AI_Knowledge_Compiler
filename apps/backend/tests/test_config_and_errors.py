@@ -196,12 +196,12 @@ def test_migrations_are_reversible() -> None:
     from akc.db.migrate import applied_versions, available_versions, downgrade, upgrade
 
     engine = get_engine()
-    assert set(available_versions()) >= {"001", "002"}
-    assert applied_versions(engine) == ["001", "002"]
+    assert set(available_versions()) >= {"001", "002", "003"}
+    assert applied_versions(engine) == ["001", "002", "003"]
 
     rolled = downgrade(engine, "0")
-    assert set(rolled) == {"001", "002"}
+    assert set(rolled) == {"001", "002", "003"}
     assert applied_versions(engine) == []
 
     upgrade(engine)
-    assert applied_versions(engine) == ["001", "002"]
+    assert applied_versions(engine) == ["001", "002", "003"]

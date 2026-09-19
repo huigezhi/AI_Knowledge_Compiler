@@ -33,7 +33,21 @@ def _compile(session: Session, payload: dict[str, Any], settings: Settings, job_
             http_status=400,
             retryable=False,
         )
-    return compile_conversation(session, conversation_id, settings=settings, job_id=job_id)
+    result = compile_conversation(session, conversation_id, settings=settings, job_id=job_id)
+
+    # 自动落盘：编译成功就把产出的知识写进 Obsidian，链路到此闭环。
+    # 之前止步于"知识进数据库"，用户在 Obsidian 里永远看不到，还得手动点同步。
+    if settings.auto_write_obsidian and settings.vault_path:
+        knowledge_ids = [str(k) for k in result.get("knowledge_ids") or []]
+        if knowledge_ids:
+            from akc.services import obsidian as obsidian_service
+
+            sync = obsidian_service.sync_knowledge(session, settings, knowledge_ids)
+            result["obsidian_written"] = len(sync["written"])
+            result["obsidian_skipped"] = sync["skipped"]
+            if sync["written"]:
+                result["obsidian_paths"] = [w["path"] for w in sync["written"]]
+    return result
 
 
 def _write_obsidian(

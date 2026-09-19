@@ -100,7 +100,9 @@ def test_atomic_replace_leaves_no_temp_files(tmp_path: Path) -> None:
 def test_vault_layout_folders() -> None:
     layout = obsidian.VaultLayout(vault_path=Path("/vault"))
     assert layout.raw_dir("deepseek") == Path("/vault/01_Raw/DeepSeek")
-    assert layout.knowledge_dir("method") == Path("/vault/03_Knowledge/Methods")
+    # 主题域目录：知识按 编程/金融/旅游 等一级域分类（类型在 frontmatter）
+    assert layout.knowledge_dir("编程技术") == Path("/vault/03_Knowledge/编程技术")
+    assert layout.knowledge_dir("") == Path("/vault/03_Knowledge/其他")
     assert layout.raw_dir("chatgpt") == Path("/vault/01_Raw/ChatGPT")
 
 
@@ -109,3 +111,36 @@ def test_resolve_vault_raises_when_unset() -> None:
 
     with pytest.raises(ObsidianVaultNotConfiguredError):
         obsidian.resolve_vault(None)
+
+
+def test_sync_knowledge_writes_to_domain_folder(session, settings, tmp_path) -> None:
+    """sync_knowledge：按主题域目录落盘（03_Knowledge/<域名>/<slug>.md）。"""
+    from akc.repositories import knowledge as kn_repo
+    from akc.services import obsidian
+
+    settings.vault_path = tmp_path
+    entity = kn_repo.create(
+        session,
+        knowledge_id="k_dom",
+        slug="测试知识条目",
+        title="测试知识条目",
+        knowledge_type="method",
+        domain="编程技术",
+        summary="摘要",
+        markdown="正文",
+    )
+    result = obsidian.sync_knowledge(session, settings, [entity.id])
+    assert len(result["written"]) == 1
+    written = Path(result["written"][0]["path"])
+    assert "03_Knowledge" in written.parts and "编程技术" in written.parts
+    assert written.exists()
+
+
+def test_sync_knowledge_skips_missing(session, settings, tmp_path) -> None:
+    from akc.services import obsidian
+
+    settings.vault_path = tmp_path
+    result = obsidian.sync_knowledge(session, settings, ["k_missing"])
+    # 缺失的知识直接 skip，不应抛异常
+    assert result["written"] == []
+    assert result["skipped"] == [{"id": "k_missing", "reason": "knowledge not found"}]

@@ -99,6 +99,15 @@
       <input id="batch-size" type="number" min="1" max="200" />
       <label><input id="write-raw" type="checkbox" /> 保存时同时把 Raw 写入 Obsidian</label>
       <label><input id="auto-compile" type="checkbox" /> 保存后自动进入编译队列</label>
+
+      <hr style="border: none; border-top: 1px solid #333844; margin: 12px 0" />
+      <label><input id="history-auto-sync" type="checkbox" /> <strong>后台静默同步历史会话</strong></label>
+      <p class="hint">
+        每
+        <input id="history-sync-interval" type="number" min="5" max="720" class="inline" />
+        分钟自动同步一次未采集的历史会话：<strong>不跳转页面、不打开任何界面</strong>，
+        由后台直接读取会话页并入库编译。打开聊天平台页面时也会触发一轮。
+      </p>
     </fieldset>
 
     <fieldset>

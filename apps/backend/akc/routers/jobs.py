@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy.orm import Session
 
 from akc.deps import SessionDep, SettingsDep
+from akc.compiler.prompts import EXTRACTOR_PROMPT_VERSION
 from akc.errors import NotFoundError
 from akc.repositories import job as job_repo
 from akc.schemas.api import CompileRequest
@@ -33,7 +34,18 @@ def create_compile_job(
         from akc.errors import AppError, ErrorCode
 
         raise AppError("conversation_id is required", code=ErrorCode.BAD_REQUEST, http_status=400)
-    key_parts = (conv_id, "extractor-v1", settings.llm_model or "-")
+    # 键必须与 import_service 的自动编译一致（含内容哈希）：
+    # 内容变化 -> 新键 -> 重新编译；内容不变 -> 幂等返回旧结果
+    from akc.repositories import conversation as conv_repo
+
+    conv = conv_repo.get(session, conv_id)
+    content_hash = str(conv.content_hash or "") if conv is not None else ""
+    key_parts = (
+        conv_id,
+        EXTRACTOR_PROMPT_VERSION,
+        settings.llm_model or "-",
+        content_hash,
+    )
     if payload.idempotency_key:
         key_parts = key_parts + (payload.idempotency_key,)
     return enqueue_job(

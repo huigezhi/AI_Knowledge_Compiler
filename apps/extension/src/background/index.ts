@@ -17,6 +17,13 @@ chrome.runtime.onInstalled.addListener(() => {
   // 点击扩展图标直接打开 Side Panel（Chrome 116+）
   void chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true });
   logger.info("extension_installed", { version: chrome.runtime.getManifest().version });
+  void scheduleHistorySync();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void scheduleHistorySync();
+  // 启动后稍等页面就绪再跑一轮静默同步；没有平台标签页时会静默跳过
+  setTimeout(() => void runSilentHistorySync("startup"), 15_000);
 });
 
 function isPlatformTab(url: string | undefined): boolean {
@@ -270,6 +277,138 @@ async function runCrawl(tabId: number, limit: number, skipExisting: boolean | un
     broadcastProgress();
   }
 }
+
+// ------------------------------------------------------------------ 静默历史同步
+/**
+ * 免跳转的后台历史同步。
+ *
+ * 与上面的遍历（runCrawl）解决同一个问题——"没点开的会话采不到"——但方式完全不同：
+ * 遍历靠**导航标签页**（用户眼看着页面跳来跳去）；这里让平台页的内容脚本
+ * **同源 fetch 会话页 HTML 并离线解析**，全程后台、不导航、不打开任何界面。
+ *
+ * 触发：chrome.alarms 周期 + 平台标签页加载完成（去抖）。
+ * 结果：只写日志与进度广播，任何失败都静默跳过（下一轮再试），绝不打扰用户。
+ */
+const HISTORY_ALARM = "akc-history-sync";
+const TAB_TRIGGER_GAP_MS = 5 * 60_000; // 标签页事件触发的最小间隔，避免频繁跑
+
+const silentSync = { running: false, lastAttemptAt: 0 };
+
+async function scheduleHistorySync(): Promise<void> {
+  const settings = await loadSettings();
+  if (!settings.historyAutoSync) {
+    await chrome.alarms.clear(HISTORY_ALARM);
+    return;
+  }
+  const minutes = Math.max(5, settings.historySyncIntervalMinutes);
+  // SW 频繁冷启动：只在闹钟缺失或周期变化时重建，否则每次冷启动都会重置计时器，
+  // 周期同步会被无限推迟
+  const existing = await chrome.alarms.get(HISTORY_ALARM);
+  if (existing && existing.periodInMinutes === minutes) return;
+  chrome.alarms.create(HISTORY_ALARM, { periodInMinutes: minutes });
+}
+
+async function runSilentHistorySync(trigger: "startup" | "alarm" | "tab"): Promise<void> {
+  if (silentSync.running || crawl.running) return;
+  if (trigger === "tab" && Date.now() - silentSync.lastAttemptAt < TAB_TRIGGER_GAP_MS) return;
+
+  const settings = await loadSettings();
+  if (!settings.historyAutoSync) return;
+
+  const tabId = await resolvePlatformTabId();
+  if (tabId === undefined) return; // 没有平台页就没有同源环境，等下一轮
+
+  silentSync.running = true;
+  silentSync.lastAttemptAt = Date.now();
+  const startedAt = Date.now();
+  const stats = { total: 0, ok: 0, failed: 0, skipped: 0 };
+  try {
+    const api = await clientFor(settings);
+    const listed = (await toContentScript(tabId, {
+      type: "AKC/LIST_CONVERSATIONS",
+      limit: 200,
+    })) as MessageResponse;
+    if (!listed?.ok || !("items" in listed)) {
+      throw new Error(errorMessage(listed, "读取历史列表失败"));
+    }
+    const items = (listed.items as ConversationSummary[]).filter((item) => Boolean(item.url));
+
+    const knownIds = new Set<string>();
+    const knownTitles = new Set<string>();
+    try {
+      const known = await api.listConversations({ limit: 1000 });
+      for (const item of known.items) {
+        if (item.provider_conversation_id) knownIds.add(item.provider_conversation_id);
+        if (item.title) knownTitles.add(item.title);
+      }
+    } catch {
+      // 后端不可达时本轮放弃（导入也会失败），等下一轮
+      throw new Error("后端不可达，本轮静默同步放弃");
+    }
+
+    const targets = items.filter((item) => {
+      const seen = isPlaceholderId(item.provider_conversation_id)
+        ? knownTitles.has(item.provider_conversation_id.slice("title:".length))
+        : knownIds.has(item.provider_conversation_id);
+      if (seen) stats.skipped += 1;
+      return !seen;
+    });
+    stats.total = targets.length;
+
+    for (const target of targets) {
+      try {
+        const response = (await toContentScript(tabId, {
+          type: "AKC/FETCH_REMOTE",
+          url: target.url!,
+        })) as MessageResponse;
+        if (!response?.ok || !("conversation" in response)) {
+          throw new Error(errorMessage(response, "离线解析失败"));
+        }
+        await api.importConversation(response.conversation, {
+          write_raw_to_obsidian: settings.writeRawToObsidian,
+          compile: settings.autoCompile,
+        });
+        stats.ok += 1;
+      } catch (error) {
+        stats.failed += 1;
+        logger.warn("silent_sync_item_failed", {
+          title: target.title,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (stats.total > 0) {
+      logger.info("silent_sync_finished", { trigger, ...stats, ms: Date.now() - startedAt });
+    }
+  } catch (error) {
+    logger.warn("silent_sync_failed", {
+      trigger,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    silentSync.running = false;
+    if (stats.ok > 0) {
+      crawl.progress.lastAutoSaveAt = Date.now();
+      broadcastProgress();
+    }
+  }
+}
+
+// 周期触发 + 平台标签页加载完成后触发（覆盖"刚打开浏览器就想同步"的场景）
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HISTORY_ALARM) void runSilentHistorySync("alarm");
+});
+
+let tabTriggerTimer: ReturnType<typeof setTimeout> | undefined;
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !isPlatformTab(tab.url)) return;
+  // 去抖：一次开多个平台页只跑一轮
+  if (tabTriggerTimer) clearTimeout(tabTriggerTimer);
+  tabTriggerTimer = setTimeout(() => void runSilentHistorySync("tab"), 20_000);
+});
+
+// Service Worker 每次冷启动都要确保闹钟存在（alarms 持久化，重复 create 即覆盖）
+void scheduleHistorySync();
 
 // ------------------------------------------------------------------ 自动保存
 async function handleAutoSave(
