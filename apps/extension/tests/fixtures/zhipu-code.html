@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>执行计划分析方法</title>
+</head>
+<body>
+  <main id="chat-container">
+    <div class="chat-title">执行计划分析方法</div>
+    <nav class="akc-history">
+      <a href="/chat/aaaaaaaaaa"><span class="akc-history-title">SQL 性能优化</span></a>
+      <a href="/chat/bbbbbbbbbb"><span class="akc-history-title">CTE 递归查询讨论</span></a>
+      <a href="/chat/cccccccccc"><span class="akc-history-title">索引失效排查</span></a>
+    </nav>
+    <div class="chat-item">
+      <div data-role="user" data-message-id="zhipu-u1">
+        <div class="akc-content">
+        怎么拿到执行计划？
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+    <div class="chat-item">
+      <div data-role="assistant" data-message-id="zhipu-a1">
+        <div class="akc-content">
+        <p>可以用下面这段 SQL 复现：</p>
+        <pre><code class="language-sql">EXPLAIN ANALYZE
+SELECT o.id, o.total
+FROM orders o
+WHERE o.created_at &gt;= '2026-01-01';</code></pre>
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>三种优化方案对比</title>
+</head>
+<body>
+  <main id="chat-container">
+    <div class="chat-title">三种优化方案对比</div>
+    <nav class="akc-history">
+      <a href="/chat/aaaaaaaaaa"><span class="akc-history-title">SQL 性能优化</span></a>
+      <a href="/chat/bbbbbbbbbb"><span class="akc-history-title">CTE 递归查询讨论</span></a>
+      <a href="/chat/cccccccccc"><span class="akc-history-title">索引失效排查</span></a>
+    </nav>
+    <div data-testid="chat-turn">
+      <div data-message-id="deepseek-u1" data-role="user">
+        <div class="akc-content">
+        这几个方案怎么选？
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+    <div data-testid="chat-turn">
+      <div data-message-id="deepseek-a1" data-role="assistant">
+        <div class="akc-content">
+        <p>三种方案对比：</p>
+        <table>
+          <tr><th>方案</th><th>耗时</th><th>风险</th></tr>
+          <tr><td>加索引</td><td>低</td><td>写放大</td></tr>
+          <tr><td>改 SQL</td><td>中</td><td>语义变化</td></tr>
+          <tr><td>分区表</td><td>高</td><td>迁移复杂</td></tr>
+        </table>
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

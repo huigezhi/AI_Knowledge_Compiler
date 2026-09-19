@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>CTE 递归查询讨论</title>
+</head>
+<body>
+  <main id="chat-container">
+    <div class="chat-title">CTE 递归查询讨论</div>
+    <nav class="akc-history">
+      <a href="/chat/aaaaaaaaaa"><span class="akc-history-title">SQL 性能优化</span></a>
+      <a href="/chat/bbbbbbbbbb"><span class="akc-history-title">CTE 递归查询讨论</span></a>
+      <a href="/chat/cccccccccc"><span class="akc-history-title">索引失效排查</span></a>
+    </nav>
+    <div class="chat-item">
+      <div data-role="user" data-message-id="zhipu-u1">
+        <div class="akc-content">
+        CTE 和子查询有什么区别？
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+    <div class="chat-item">
+      <div data-role="assistant" data-message-id="zhipu-a1">
+        <div class="akc-content">
+        CTE 可读性更好；递归场景必须用 CTE。
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+    <div class="chat-item">
+      <div data-role="user" data-message-id="zhipu-u2">
+        <div class="akc-content">
+        性能上呢？
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+    <div class="chat-item">
+      <div data-role="assistant" data-message-id="zhipu-a2">
+        <div class="akc-content">
+        大多数情况下优化器会内联展开，差异不大。
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+    <div class="chat-item">
+      <div data-role="user" data-message-id="zhipu-u3">
+        <div class="akc-content">
+        什么时候会变慢？
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+    <div class="chat-item">
+      <div data-role="assistant" data-message-id="zhipu-a3">
+        <div class="akc-content">
+        递归层级深或需要物化时，需要显式控制。
+        </div>
+        <time datetime="2026-09-18T20:31:00+08:00"></time>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
