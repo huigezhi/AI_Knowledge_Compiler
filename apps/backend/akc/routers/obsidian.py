@@ -71,6 +71,7 @@ def sync(
             prompt_version=item.prompt_version,
             model=item.model,
             version=item.version,
+            compiler=item.model,
         )
         path = layout.knowledge_dir(item.knowledge_type) / f"{item.slug}.md"
         try:

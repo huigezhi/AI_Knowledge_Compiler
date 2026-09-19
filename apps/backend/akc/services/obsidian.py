@@ -136,8 +136,13 @@ def build_knowledge_markdown(
     prompt_version: str | None = None,
     model: str | None = None,
     version: int = 1,
+    compiler: str | None = None,
 ) -> str:
-    """Knowledge Markdown（需求文档 §10.3）。"""
+    """Knowledge Markdown（需求文档 §10.3）。
+
+    ``compiler`` 是实际跑编译的模型/服务标识。早先硬编码成 ``Claude``，
+    于是用 DeepSeek 编译出来的笔记也自称 Claude 出品，溯源信息是错的。
+    """
     frontmatter = "\n".join(
         [
             "---",
@@ -151,7 +156,7 @@ def build_knowledge_markdown(
             "sources:" + _yaml_list(source_links, indent=2),
             f"created_at: {created_at}",
             f"updated_at: {updated_at}",
-            "compiler: Claude",
+            f"compiler: {compiler or model or 'unknown'}",
             f"prompt_version: {prompt_version or ''}",
             f"model: {model or ''}",
             "---",

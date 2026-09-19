@@ -57,6 +57,13 @@ _EXTRACTOR_TEMPLATE = textwrap.dedent(
 
     <taxonomy>{taxonomy}</taxonomy>
 
+    <output_budget>
+    - 最多 {max_items} 条 items；宁可把相近内容合并成一条，也不要逐条罗列。
+    - 每条 summary 不超过 60 字；body_markdown 不超过 {max_body_chars} 字。
+    - entities 最多 8 个，relations 最多 5 条，contradictions 最多 3 条，notes 最多 3 条。
+    - 总输出必须能一次性写完，绝不能因为长度被截断：宁少勿多。
+    </output_budget>
+
     Extract durable knowledge items from the conversation above.
 
     Output a single JSON object with this shape:
@@ -157,7 +164,16 @@ def build_extractor_prompt(
     related_knowledge: list[dict[str, Any]],
     *,
     max_chars: int = 50_000,
+    max_items: int = 6,
+    max_body_chars: int = 400,
 ) -> str:
+    """``max_items`` / ``max_body_chars`` 是**输出预算**。
+
+    DeepSeek / Claude 的单次输出上限是硬性的（DeepSeek 为 8192 token），
+    而模型的默认倾向是"把每个细节都拆成一条知识"——`_debug` 里实测一轮就写满
+    8192 token 被截断，截断的 JSON 必然解析失败，于是任务永远失败。
+    与其事后补救，不如在 Prompt 里就把输出规模压到能一次写完。
+    """
     return _EXTRACTOR_TEMPLATE.format(
         provider=conversation.get("provider", ""),
         title=conversation.get("title", ""),
@@ -166,6 +182,8 @@ def build_extractor_prompt(
         related_knowledge=render_related_knowledge(related_knowledge),
         taxonomy=TAXONOMY,
         taxonomy_inline=TAXONOMY.replace(", ", "|"),
+        max_items=max_items,
+        max_body_chars=max_body_chars,
     )
 
 

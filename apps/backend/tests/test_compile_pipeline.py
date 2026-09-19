@@ -186,3 +186,70 @@ def test_compile_requires_enabled_compiler(session: Session, settings: Settings)
     assert exc.value.retryable is False
     # 单独的错误码：让前端能区分「没配 LLM」与「调用失败」
     assert exc.value.code == ErrorCode.LLM_DISABLED
+
+
+# ---------------------------------------------------------------- 输出截断
+def _transport_scripted(
+    texts: list[str], stop_reasons: list[str] | None = None
+) -> tuple[httpx.MockTransport, list[int]]:
+    """按调用顺序返回预设文本，并记录调用次数。"""
+    calls: list[int] = []
+    stops = stop_reasons or ["end_turn"] * len(texts)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        idx = len(calls)
+        calls.append(idx)
+        text = texts[min(idx, len(texts) - 1)]
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": text}],
+                "stop_reason": stops[min(idx, len(stops) - 1)],
+            },
+        )
+
+    return httpx.MockTransport(handler), calls
+
+
+_TRUNCATED = (
+    '{"items": ['
+    '{"title": "完整条目一", "type": "method", "summary": "有来源。",'
+    ' "body_markdown": "正文", "source_message_ids": ["m2"], "confidence": 0.8},'
+    '{"title": "被掐断的条目", "type": "fact", "summary": "写到这里就没'
+)
+
+
+def test_truncated_output_is_salvaged_instead_of_failing() -> None:
+    """写满 max_tokens 被掐断时，前面完整的条目要保住，而不是整轮作废。"""
+    transport, _ = _transport_scripted([_TRUNCATED], ["max_tokens"])
+    client = ClaudeClient(ClaudeSettings(api_key="k", model="m"), transport=transport)
+    data = client.complete_json("sys", "user")
+    assert [item["title"] for item in data["items"]] == ["完整条目一"]
+
+
+def test_extraction_retries_with_tighter_budget_when_truncated() -> None:
+    """截断不是"模型不合规"，应当收紧输出预算重试。"""
+    good = json.dumps(_output())
+    transport, calls = _transport_scripted(["{{{ 完全救不回来"], ["max_tokens"])
+    # 第二档才给正常结果
+    transport2, calls2 = _transport_scripted(["{{{ 完全救不回来", good], ["max_tokens", "end_turn"])
+    client = ClaudeClient(ClaudeSettings(api_key="k", model="m"), transport=transport2)
+    result = run_extraction(client, {"provider": "deepseek", "title": "t", "messages": []}, [])
+    assert len(calls2) == 2
+    assert result["items"]
+
+    # 救不回来的截断：三档预算用完后再抛错，且错误是"不可重试"
+    client_bad = ClaudeClient(ClaudeSettings(api_key="k", model="m"), transport=transport)
+    with pytest.raises(ClaudeOutputInvalidError) as exc:
+        run_extraction(client_bad, {"provider": "deepseek", "title": "t", "messages": []}, [])
+    assert exc.value.details.get("truncated") is True
+    assert len(calls) == 3
+
+
+def test_non_truncated_invalid_output_is_not_retried() -> None:
+    """非截断的非法输出重试无意义：只调用一次，避免放大成本。"""
+    transport, calls = _transport_scripted(["I cannot help with that"], ["end_turn"])
+    client = ClaudeClient(ClaudeSettings(api_key="k", model="m"), transport=transport)
+    with pytest.raises(ClaudeOutputInvalidError):
+        run_extraction(client, {"provider": "deepseek", "title": "t", "messages": []}, [])
+    assert len(calls) == 1

@@ -13,8 +13,15 @@ from akc.compiler.prompts import (
 )
 from akc.compiler.validator import validate_compiler_output
 from akc.errors import ClaudeOutputInvalidError
+from akc.logging_setup import get_logger
 
 _MERGE_ACTIONS = {"create", "update", "merge", "ignore", "review"}
+
+
+# 输出预算梯次：先给足，被截断就逐档收紧，而不是直接判死。
+# 实测（DeepSeek，单次输出上限 8192 token）：默认 6 条 x 400 字已经够写，
+# 只有模型执意逐条罗列时才会掉到后面几档。
+_EXTRACTION_BUDGETS: tuple[tuple[int, int], ...] = ((6, 400), (3, 200), (2, 150))
 
 
 def run_extraction(
@@ -26,22 +33,58 @@ def run_extraction(
 ) -> dict[str, Any]:
     """返回 ``CompilerOutput``（已通过 Schema 校验）。
 
-    校验失败抛 ``ClaudeOutputInvalidError``——**不可自动重试**，因为重试通常仍不合规，
-    且会放大成本；调用方应把 job 标记为失败并交由人工处理。
+    Schema 校验失败抛 ``ClaudeOutputInvalidError``——**不可自动重试**，因为重试通常
+    仍不合规且会放大成本；调用方应把 job 标记为失败并交由人工处理。
+
+    唯一例外是**输出被截断**（``stop_reason=max_tokens``）：那不是模型不合规，
+    而是要写的东西太多。此时收紧输出预算重试，最多 ``_EXTRACTION_BUDGETS`` 档。
     """
-    prompt = build_extractor_prompt(conversation, related_knowledge, max_chars=max_chars)
-    raw = client.complete_json(SYSTEM_PROMPT, prompt)
-    normalized = _coerce(raw)
-    try:
-        validate_compiler_output(normalized)
-    except Exception as exc:  # noqa: BLE001 - 统一转换为不可重试错误
-        raise ClaudeOutputInvalidError(
-            "compiler output failed schema validation",
-            details={"reason": str(exc)},
-        ) from exc
-    normalized["prompt_version"] = EXTRACTOR_PROMPT_VERSION
-    normalized["model"] = client.model
-    return normalized
+    last_error: ClaudeOutputInvalidError | None = None
+    for attempt, (max_items, max_body_chars) in enumerate(_EXTRACTION_BUDGETS):
+        prompt = build_extractor_prompt(
+            conversation,
+            related_knowledge,
+            max_chars=max_chars,
+            max_items=max_items,
+            max_body_chars=max_body_chars,
+        )
+        try:
+            raw = client.complete_json(SYSTEM_PROMPT, prompt)
+        except ClaudeOutputInvalidError as exc:
+            if not (exc.details or {}).get("truncated"):
+                raise
+            last_error = exc
+            get_logger().warning(
+                "extraction_truncated_retry",
+                extra={
+                    "extra_fields": {
+                        "attempt": attempt + 1,
+                        "next_max_items": max_items,
+                    }
+                },
+            )
+            continue
+
+        normalized = _coerce(raw)
+        # 抢救回来的结果里一条都没剩下时，值得用更小的预算再试一次
+        if not normalized["items"] and attempt + 1 < len(_EXTRACTION_BUDGETS):
+            last_error = ClaudeOutputInvalidError(
+                "compiler output truncated before any complete item",
+                details={"truncated": True},
+            )
+            continue
+        try:
+            validate_compiler_output(normalized)
+        except Exception as exc:  # noqa: BLE001 - 统一转换为不可重试错误
+            raise ClaudeOutputInvalidError(
+                "compiler output failed schema validation",
+                details={"reason": str(exc)},
+            ) from exc
+        normalized["prompt_version"] = EXTRACTOR_PROMPT_VERSION
+        normalized["model"] = client.model
+        return normalized
+
+    raise last_error or ClaudeOutputInvalidError("compiler output could not be produced")
 
 
 def run_merge_planning(

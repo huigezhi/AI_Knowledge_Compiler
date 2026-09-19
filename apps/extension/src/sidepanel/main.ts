@@ -256,8 +256,28 @@ async function startCompile(conversationId: string): Promise<void> {
     const job = await state.api.createCompileJob(conversationId);
     await pollJob(job.id);
     await refreshKnowledge();
+    await autoWriteToObsidian();
   } catch (error) {
     showError(humanizeError(error), () => startCompile(conversationId));
+  }
+}
+
+/** 编译成功后自动落盘。
+
+ 编译只写数据库；不调用 obsidian/sync 的话，Obsidian 仓库里一个文件都不会出现——
+ 用户看到的就是"编译成功了，但我的知识在哪？"。这里把这一步接上，省掉
+ "编译完还得记得再点一次写入"的隐性操作。写入是幂等的（按内容哈希比对），
+ 重复执行不会覆盖用户在 Obsidian 里的手工修改。
+ */
+async function autoWriteToObsidian(): Promise<void> {
+  if (state.knowledgeIds.length === 0) return;
+  try {
+    const result = await state.api.syncObsidian({ knowledge_ids: state.knowledgeIds });
+    const skipped = result.skipped.length ? ` · 跳过 ${result.skipped.length} 个（冲突）` : "";
+    setText("sync-status", `已编译并写入 Obsidian：${result.written.length} 个文件${skipped}`);
+  } catch (error) {
+    // 落盘失败不该推翻"编译成功"的结论，降级为提示而不是红色错误横幅。
+    setText("sync-status", `编译成功，但写入 Obsidian 失败：${humanizeError(error)}`);
   }
 }
 

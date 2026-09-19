@@ -22,6 +22,33 @@ _ANTHROPIC_VERSION = "2023-06-01"
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
 
+def _salvage_json(cleaned: str) -> dict[str, Any] | None:
+    """把被截断的 JSON 抢救到"仍能用的程度"。
+
+    模型写满 token 被掐断时，最后一条 item 通常是半成品，但**前面那些条目是完整的**。
+    全部丢弃等于这次调用白花钱、任务直接失败；这里回退到最后一个完整条目的边界，
+    补齐闭合括号后解析，让已经抽出来的知识照样进库。
+    Schema 只强制 ``items``，缺失的 entities/relations 等由 ``_coerce`` 补默认值。
+    """
+    text = cleaned
+    # 依次尝试把尾部回退到更早的一个 "}" 边界；每轮必须严格变短，否则会死循环。
+    for _ in range(200):
+        idx = text.rfind("}")
+        if idx <= 0:
+            return None
+        head = text[: idx + 1]
+        for candidate in (head, head.rstrip().rstrip(",")):
+            for closing in ("\n  ]\n}", "\n]}", "]}", "}"):
+                try:
+                    parsed = json.loads(candidate + closing)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict) and isinstance(parsed.get("items"), list):
+                    return parsed
+        text = text[:idx]
+    return None
+
+
 class ClaudeSettings:
     """运行期最小配置视图（避免 compiler 层依赖全局 Settings）。"""
 
@@ -80,7 +107,7 @@ class ClaudeClient:
         }
         data = self._post("/v1/messages", payload)
         text = self._extract_text(data)
-        return self._parse_json(text)
+        return self._parse_json(text, stop_reason=str(data.get("stop_reason") or ""))
 
     def close(self) -> None:
         self._client.close()
@@ -139,7 +166,7 @@ class ClaudeClient:
         return text
 
     @staticmethod
-    def _parse_json(text: str) -> dict[str, Any]:
+    def _parse_json(text: str, *, stop_reason: str = "") -> dict[str, Any]:
         cleaned = _JSON_FENCE.sub("", text).strip()
         # 兼容模型在 JSON 前后附加少量说明的情况：截取首个 { 与最后一个 }。
         if not cleaned.startswith("{"):
@@ -148,22 +175,37 @@ class ClaudeClient:
             if start == -1 or end <= start:
                 raise ClaudeOutputInvalidError("claude output is not a JSON object")
             cleaned = cleaned[start : end + 1]
+        # stop_reason 是"是否截断"的唯一权威信号：靠"结尾是不是 }"猜会漏判
+        # —— 模型完全可能在写满 token 时正好停在一个合法的 } 上，但内容其实不完整。
+        truncated = stop_reason == "max_tokens" or not cleaned.rstrip().endswith("}")
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError as exc:
+            salvaged = _salvage_json(cleaned) if truncated else None
+            if salvaged is not None:
+                kept = len(salvaged.get("items") or [])
+                get_logger().warning(
+                    "claude_output_salvaged",
+                    extra={"extra_fields": {"kept_items": kept, "reason": str(exc)}},
+                )
+                log_event("claude_json_parsed", keys=sorted(salvaged))
+                return salvaged
             # 只报"not valid JSON"没有任何可排查性：必须带上模型实际返回了什么。
-            # 最常见的原因是输出被 max_tokens 截断（cleaned 不以 } 结尾），
-            # 其次是模型在 JSON 里写了注释/尾逗号。把两者区分开，省一轮来回。
+            # 最常见的原因是输出被 max_tokens 截断，其次是模型在 JSON 里写了注释/尾逗号。
             preview = text.strip()[:300]
-            truncated = not cleaned.rstrip().endswith("}")
-            hint = "，输出被截断（多半是 max_tokens 不足）" if truncated else ""
+            hint = "，输出被截断（模型写满了单次输出上限）" if truncated else ""
             get_logger().warning(
                 "claude_output_not_json",
                 extra={"extra_fields": {"reason": str(exc), "truncated": truncated}},
             )
             raise ClaudeOutputInvalidError(
                 f"claude output is not valid JSON{hint}: {exc}; 原始输出开头：{preview!r}",
-                details={"reason": str(exc), "preview": preview, "truncated": truncated},
+                details={
+                    "reason": str(exc),
+                    "preview": preview,
+                    "truncated": truncated,
+                    "stop_reason": stop_reason,
+                },
             ) from exc
         if not isinstance(parsed, dict):
             raise ClaudeOutputInvalidError("claude output must be a JSON object")
