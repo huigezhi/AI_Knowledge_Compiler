@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# AI Knowledge Compiler (AKC) — repository hygiene
+# ---------------------------------------------------------------------------
+
+# --- Node / JS toolchain ---------------------------------------------------
+node_modules/
+.pnpm-store/
+.npmrc
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+.eslintcache
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- Local runtime data (NEVER commit) ------------------------------------
+# SQLite database, vault copies, exports and any raw conversation dump.
+/data/
+apps/backend/data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+/backups/
+/exports/
+
+# --- Secrets --------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+.gh.sh
+
+# --- Editors / OS ---------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs -----------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
