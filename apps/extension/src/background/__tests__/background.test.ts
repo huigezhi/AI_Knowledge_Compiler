@@ -78,9 +78,37 @@ describe("background message routing", () => {
       code: string;
       message: string;
     };
+    // 扩展更新后旧页面失联是最常见的场景，要给出"刷新平台页面"的针对性提示
     expect(response.ok).toBe(false);
+    expect(response.code).toBe("CONTENT_SCRIPT_STALE");
+    expect(response.message).toContain("刷新");
+  });
+
+  it("非失联类通信错误保持通用提示", async () => {
+    tabsSendMessage.mockRejectedValue(new TypeError("cannot read properties of undefined"));
+    const response = (await dispatch({ type: "AKC/LIST_CONVERSATIONS" })) as {
+      ok: boolean;
+      code: string;
+      message: string;
+    };
     expect(response.code).toBe("CONTENT_SCRIPT_UNAVAILABLE");
     expect(response.message).toContain("刷新页面");
+  });
+
+  it("当前标签页不是平台页时，回退到最近使用的聊天平台标签页", async () => {
+    // 活动标签页没有 url（非平台页），但存在另一个豆包标签页
+    tabsQuery.mockImplementation((query: Record<string, unknown>) => {
+      if (query.active) return Promise.resolve([{ id: 9, url: "https://example.com/docs" }]);
+      return Promise.resolve([
+        { id: 9, url: "https://example.com/docs" },
+        { id: 42, url: "https://www.doubao.com/chat/1" },
+      ]);
+    });
+    tabsSendMessage.mockResolvedValue({ ok: true, provider: "doubao", page: "conversation" });
+
+    const response = (await dispatch({ type: "AKC/DETECT_PAGE" })) as { ok: boolean };
+    expect(tabsSendMessage).toHaveBeenCalledWith(42, { type: "AKC/DETECT_PAGE" });
+    expect(response.ok).toBe(true);
   });
 
   it("支持打开侧边栏", async () => {

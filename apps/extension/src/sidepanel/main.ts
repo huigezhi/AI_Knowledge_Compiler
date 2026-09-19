@@ -86,6 +86,12 @@ async function detectProvider(): Promise<void> {
   const response = await toBackground({ type: "AKC/DETECT_PAGE" });
   if (!response.ok) {
     setText("provider-name", "未检测到会话");
+    setText(
+      "adapter-health",
+      response.code === "CONTENT_SCRIPT_STALE"
+        ? "扩展刚更新：刷新平台页面（F5）后即可"
+        : "请打开豆包 / DeepSeek / ChatGPT 等聊天页面",
+    );
     return;
   }
   if (!("provider" in response)) return;

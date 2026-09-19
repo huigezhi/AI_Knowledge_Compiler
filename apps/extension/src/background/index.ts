@@ -7,6 +7,7 @@
  */
 
 import type { Conversation, ConversationSummary } from "@akc/schema";
+import { adapterForUrl } from "@/adapters/registry";
 import { AkcApiClient } from "@/shared/api-client";
 import { logger } from "@/shared/logger";
 import { isMessage, type CrawlProgress, type Message, type MessageResponse } from "@/shared/messaging";
@@ -18,9 +19,31 @@ chrome.runtime.onInstalled.addListener(() => {
   logger.info("extension_installed", { version: chrome.runtime.getManifest().version });
 });
 
-async function activeTabId(): Promise<number | undefined> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id;
+function isPlatformTab(url: string | undefined): boolean {
+  if (!url) return false;
+  return adapterForUrl(url) !== null;
+}
+
+/**
+ * 找到应该与侧边栏对话的标签页。
+ *
+ * 侧边栏是**窗口级**的：用户在豆包打开侧边栏后切到别的标签页查资料，
+ * 侧边栏不能因此废掉。所以优先用当前活动标签页，不是平台页时
+ * 回退到「最近用过的聊天平台标签页」，最后才用活动标签页兜底（让它报错）。
+ */
+async function resolvePlatformTabId(): Promise<number | undefined> {
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active?.id !== undefined && isPlatformTab(active.url)) return active.id;
+
+  const all = await chrome.tabs.query({});
+  const platformTabs = all
+    .filter((tab) => tab.id !== undefined && isPlatformTab(tab.url))
+    .sort(
+      (a, b) =>
+        ((b as { lastAccessed?: number }).lastAccessed ?? 0) -
+        ((a as { lastAccessed?: number }).lastAccessed ?? 0),
+    );
+  return platformTabs[0]?.id ?? active?.id;
 }
 
 async function toContentScript(tabId: number, message: Message): Promise<unknown> {
@@ -292,9 +315,14 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
           sendResponse({ ok: false, code: "CRAWL_BUSY", message: "已有遍历任务在进行中" });
           return;
         }
-        const tabId = message.tabId ?? (await activeTabId());
+        // 遍历要在平台标签页里导航，绝不能拿用户正在用的其它页面开刀
+        const tabId = message.tabId ?? (await resolvePlatformTabId());
         if (!tabId) {
-          sendResponse({ ok: false, code: "NO_ACTIVE_TAB", message: "没有活动的标签页" });
+          sendResponse({
+            ok: false,
+            code: "NO_PLATFORM_TAB",
+            message: "没有找到聊天平台标签页：请先打开豆包 / DeepSeek / ChatGPT 等页面再试。",
+          });
           return;
         }
         crawl.running = true;
@@ -314,7 +342,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
         return;
       }
 
-      const tabId = "tabId" in message && message.tabId ? message.tabId : await activeTabId();
+      const tabId = "tabId" in message && message.tabId ? message.tabId : await resolvePlatformTabId();
       if (!tabId) {
         sendResponse({ ok: false, code: "NO_ACTIVE_TAB", message: "没有活动的标签页" } satisfies MessageResponse);
         return;
@@ -329,14 +357,17 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
       const result = (await toContentScript(tabId, message)) as MessageResponse;
       sendResponse(result ?? { ok: false, code: "NO_RESPONSE", message: "content script 未响应" });
     } catch (error) {
-      logger.error("background_message_failed", {
-        type: message.type,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const raw = error instanceof Error ? error.message : String(error);
+      logger.error("background_message_failed", { type: message.type, error: raw });
+      // 扩展更新后旧页面里的 content script 会失联（"Receiving end does not exist"），
+      // 这时的正确动作是刷新平台页面，而不是笼统的"通信失败"
+      const stale = /receiving end|message port|frame with id/i.test(raw);
       sendResponse({
         ok: false,
-        code: "CONTENT_SCRIPT_UNAVAILABLE",
-        message: "无法与目标页面通信，请刷新页面后重试。",
+        code: stale ? "CONTENT_SCRIPT_STALE" : "CONTENT_SCRIPT_UNAVAILABLE",
+        message: stale
+          ? "扩展刚更新过：请刷新（F5）聊天平台页面，然后重试。"
+          : "无法与目标页面通信，请刷新页面后重试。",
       } satisfies MessageResponse);
     }
   })();
