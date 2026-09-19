@@ -54,6 +54,26 @@ def test_auth_token_persisted(tmp_path) -> None:  # noqa: ANN001
     assert settings.ensure_auth_token() == token
 
 
+def test_empty_env_values_are_unset(tmp_path) -> None:  # noqa: ANN001
+    """`.env` 里写 `AKC_VAULT_PATH=` 必须等同「未配置」。
+
+    回归：pydantic 会把空串解析成 Path('.')（真值），导致「未配置 Vault」的校验
+    被绕过、同步把文件写进当前工作目录。
+    """
+    from akc.config import Settings
+
+    settings = Settings(
+        data_dir=tmp_path,
+        vault_path="",
+        claude_model="",
+        claude_api_key="",
+        _env_file=None,  # type: ignore[call-arg]
+    )
+    assert settings.vault_path is None
+    assert settings.claude_model is None
+    assert settings.claude_api_key is None
+
+
 def test_error_payload_shape() -> None:
     payload = AppError("boom", code=ErrorCode.CONFLICT, retryable=True).to_payload("rid-1")
     assert payload == {

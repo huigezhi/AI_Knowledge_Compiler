@@ -77,6 +77,19 @@ class Settings(BaseSettings):
     job_backoff_seconds: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [2, 5, 15])
 
     # ------------------------------------------------------------------ 校验
+    @field_validator("vault_path", "claude_model", "claude_api_key", "auth_token", mode="before")
+    @classmethod
+    def _empty_string_is_unset(cls, value: object) -> object:
+        """空值等同「未配置」。
+
+        关键：`.env` 里写 `AKC_VAULT_PATH=`（空值）时，pydantic 会把空串解析成
+        ``Path('.')`` —— 这是**真值**，会让「未配置 Vault」的校验被绕过，
+        同步时把文件写进当前工作目录。这里统一把空串归一为 None。
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("log_level")
     @classmethod
     def _check_log_level(cls, v: str) -> str:
