@@ -26,7 +26,8 @@ param(
 
     [switch]$Off,      # autostart -Off 取消自启；install 时跳过构建扩展用 -SkipExtension
     [switch]$Purge,    # uninstall -Purge 连同数据与配置一起删除
-    [switch]$SkipExtension
+    [switch]$SkipExtension,
+    [switch]$AsTask    # autostart -AsTask 额外注册计划任务（需要管理员权限）
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,22 +42,6 @@ $TaskName  = "AKC Backend"
 function Write-Step { param($Message) Write-Host "[AKC] $Message" -ForegroundColor Cyan }
 function Write-Ok   { param($Message) Write-Host "[OK ] $Message" -ForegroundColor Green }
 function Write-Warn { param($Message) Write-Host "[!! ] $Message" -ForegroundColor Yellow }
-
-function Remove-DuplicateEnvVars {
-    <#
-    某些 shell（如 Git Bash）派生出的会话会同时存在 Path 与 PATH，
-    Start-Process 构造子进程环境时会抛“已添加项”错误。这里只保留一个。
-    #>
-    $seen = @{}
-    foreach ($entry in @(Get-ChildItem Env:)) {
-        $key = $entry.Name.ToLowerInvariant()
-        if ($seen.ContainsKey($key)) {
-            Remove-Item "Env:\$($entry.Name)" -ErrorAction SilentlyContinue
-        } else {
-            $seen[$key] = $true
-        }
-    }
-}
 
 function Get-BackendPid {
     $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -159,15 +144,38 @@ function Invoke-Start {
     $errLog = Join-Path $logDir "akc.err.log"
 
     Write-Step "启动后端（端口 $Port）"
-    Remove-DuplicateEnvVars
+    # 启动方式三级回退（都是标准做法，只是适配不同环境）：
+    #   1) 常规 Start-Process
+    #   2) -UseNewEnvironment：某些 shell 派生的会话里进程环境块存在大小写重复键
+    #      （Path 与 PATH），Start-Process 会抛"已添加了具有相同键的项"；
+    #      用全新环境块可绕开，且保留日志重定向
+    #   3) CIM Win32_Process.Create：最底层，由 cmd 负责重定向
+    $launched = $false
+    $startArgs = @{
+        FilePath = $PyExe
+        ArgumentList = @("-m", "akc")
+        WorkingDirectory = $Backend
+        WindowStyle = "Hidden"
+        RedirectStandardOutput = $outLog
+        RedirectStandardError = $errLog
+    }
     try {
-        Start-Process -FilePath $PyExe -ArgumentList "-m","akc" `
-            -WorkingDirectory $Backend -WindowStyle Hidden `
-            -RedirectStandardOutput $outLog -RedirectStandardError $errLog | Out-Null
+        Start-Process @startArgs | Out-Null
+        $launched = $true
     } catch {
-        # 某些 shell 派生出的会话里同时存在 Path 与 PATH，Start-Process 会抛
-        # "已添加项。字典中的关键字: Path"，此时改用 CIM 拉起进程（由 cmd 负责日志重定向）。
-        Write-Warn "Start-Process 不可用，改用 CIM 启动：$($_.Exception.Message)"
+        Write-Warn "常规启动失败：$($_.Exception.Message.Trim())"
+    }
+    if (-not $launched) {
+        try {
+            Start-Process @startArgs -UseNewEnvironment | Out-Null
+            $launched = $true
+            Write-Ok "已用干净环境块启动"
+        } catch {
+            Write-Warn "干净环境块启动失败：$($_.Exception.Message.Trim())"
+        }
+    }
+    if (-not $launched) {
+        Write-Warn "改用 CIM 启动"
         $cmdLine = 'cmd.exe /c "' + $PyExe + '" -m akc > "' + $outLog + '" 2> "' + $errLog + '"'
         $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
             -Arguments @{ CommandLine = $cmdLine; CurrentDirectory = $Backend }
@@ -213,30 +221,100 @@ function Invoke-Status {
             Write-Host "     vault=$vp"
         } catch { }
     }
+    $hasStartup = (Test-Path (Get-StartupLink)) -or (Test-Path (Get-StartupCmd))
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    Write-Host "     开机自启：$(if ($task) { '已开启' } else { '未开启（.\akc.ps1 autostart）' })"
+    $auto = if ($hasStartup) { "已开启（启动文件夹）" } elseif ($task) { "已开启（计划任务）" } else { "未开启（.\akc.ps1 autostart）" }
+    Write-Host "     开机自启：$auto"
+}
+
+function Get-StartupLink {
+    return Join-Path ([Environment]::GetFolderPath("Startup")) "AKC Backend.lnk"
+}
+
+function Get-StartupCmd {
+    return Join-Path ([Environment]::GetFolderPath("Startup")) "AKC Backend.cmd"
+}
+
+function Remove-StartupEntries {
+    $removed = @()
+    foreach ($p in @((Get-StartupLink), (Get-StartupCmd))) {
+        if (Test-Path $p) {
+            Remove-Item $p -Force -ErrorAction SilentlyContinue
+            $removed += $p
+        }
+    }
+    return $removed
 }
 
 function Invoke-Autostart {
     if ($Off) {
+        $removed = Remove-StartupEntries
+        $removed | ForEach-Object { Write-Ok "已移除启动项：$_" }
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         Write-Ok "已取消开机自启"
         return
     }
+
+    # 用「启动文件夹」实现登录自启：不需要管理员权限，也不需要 NSSM 之类的服务包装器。
+    # 注：Register-ScheduledTask 在根目录注册任务会要求管理员权限（实测报"拒绝访问"），
+    #     因此默认不采用计划任务（需要时可加 -AsTask，并自行以管理员身份运行）。
     $ps = (Get-Command powershell.exe).Source
     $script = Join-Path $PSScriptRoot "akc.ps1"
-    $action  = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`" start"
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-        -Description "AI Knowledge Compiler 本地后端" -Force | Out-Null
-    Write-Ok "已注册登录自启任务：$TaskName"
+    $args = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`" start"
+
+    $created = $null
+    # 首选 .lnk（可设置为最小化，登录时不弹窗）；COM 不可用时退回 .cmd
+    try {
+        $link = Get-StartupLink
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($link)
+        $shortcut.TargetPath = $ps
+        $shortcut.Arguments = $args
+        $shortcut.WorkingDirectory = $PSScriptRoot
+        $shortcut.WindowStyle = 7
+        $shortcut.Description = "AI Knowledge Compiler backend"
+        $shortcut.Save()
+        if (Test-Path $link) { $created = $link }
+    } catch {
+        Write-Warn "创建快捷方式失败（$($_.Exception.Message.Trim())），改用 .cmd 启动项"
+    }
+
+    if (-not $created) {
+        $cmdPath = Get-StartupCmd
+        $lines = @(
+            "@echo off",
+            "rem AI Knowledge Compiler backend - 登录时自动启动",
+            "`"$ps`" $args"
+        )
+        Set-Content -Path $cmdPath -Value $lines -Encoding Default
+        if (Test-Path $cmdPath) { $created = $cmdPath }
+    }
+
+    if (-not $created) { throw "创建启动项失败，请检查启动文件夹是否可写" }
+    Write-Ok "已开启登录自启（启动文件夹，无需管理员权限）"
+    Write-Host "     启动项：$created"
+    Write-Host "     取消：.\akc.ps1 autostart -Off"
+
+    if ($AsTask) {
+        Write-Step "另外注册计划任务（需要管理员权限，失败不影响上面的启动项）"
+        try {
+            $action = New-ScheduledTaskAction -Execute $ps -Argument $args
+            $trigger = New-ScheduledTaskTrigger -AtLogOn
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+            Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+                -Description "AI Knowledge Compiler 本地后端" -Force | Out-Null
+            Write-Ok "已注册计划任务：$TaskName"
+        } catch {
+            Write-Warn "计划任务注册失败（$($_.Exception.Message.Trim())）——启动文件夹方式已生效，可忽略"
+        }
+    }
 }
 
 function Invoke-Uninstall {
     Write-Step "停止服务"
     Invoke-Stop
     Write-Step "取消开机自启"
+    Remove-StartupEntries | Out-Null
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 
     if (Test-Path $Venv) { Remove-Item -Recurse -Force $Venv; Write-Ok "已删除 .venv" }

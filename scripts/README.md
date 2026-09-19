@@ -41,7 +41,7 @@ cd scripts\windows
 .\akc.ps1 install      # 幂等，可重复执行
 .\akc.ps1 start
 .\akc.ps1 status       # 看运行状态、版本、Vault 是否配置
-.\akc.ps1 autostart    # 注册计划任务（登录时启动）
+.\akc.ps1 autostart    # 开启登录自启（写启动文件夹，无需管理员）
 .\akc.ps1 autostart -Off
 .\akc.ps1 uninstall            # 保留数据与 .env
 .\akc.ps1 uninstall -Purge     # 连数据库和配置一起删
@@ -50,7 +50,11 @@ cd scripts\windows
 说明：
 
 - `install` 不会覆盖已有的 `.env` 与数据库；
-- `autostart` 用「计划任务（登录时触发）」实现，不需要管理员权限，也不需要 NSSM；
+- `autostart` 用「**启动文件夹快捷方式**」实现登录自启：不需要管理员权限，也不需要 NSSM。
+  首次优先创建 `.lnk`（最小化窗口），COM 不可用时自动退回 `.cmd`；
+  `status` 会显示当前自启状态，`autostart -Off` 或 `uninstall` 会清理。
+- 只有在确实需要「计划任务」时才加 `-AsTask`：**根目录注册任务要求管理员权限**，
+  非管理员运行会报「拒绝访问」（HRESULT 0x80070005）——所以默认不走这条路。
 - 首次启动会在 `apps\backend\data\auth_token` 生成本地令牌，扩展必须填它。
 
 ---
