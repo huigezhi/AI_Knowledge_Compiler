@@ -74,9 +74,27 @@ createDeepSeekAdapter({ url: "https://chat.deepseek.com/chat/abc", root: documen
 
 fixtures 已提交到仓库，**禁止只依赖线上页面测试**。
 
-## 6. 页面结构变化时的标准修复流程
+## 6. 采集真实页面结构（无法复现时的关键手段）
 
-1. 更新 `src/adapters/<provider>.ts` 的 `SELECTORS`；
+适配器开发/修复最大的障碍是平台需要登录，开发者拿不到真实 DOM。
+用 `apps/extension/scripts/dom-probe.js`：把它粘贴到目标页面 Console 运行，
+输出**脱敏后的结构描述**（文本全部替换为 `{n字}` 占位符）：
+
+- `currentSelectors`：AKC 当前配置的每个选择器命中数量（0 即失效的那个）
+- `dataAttrs` / `classHits`：带 message/chat/role 语义的属性与类名统计
+- `repeatedSiblingSignatures`：重复出现的兄弟容器签名 —— 消息列表的典型形态
+- `messageSamples`：疑似消息容器的嵌套结构（保留标签与属性，不含文字）
+- `counts`：元素总数 / iframe 数 / shadow DOM 宿主数（用来判断是否被隔离在子文档里）
+
+> 诊断顺序：先看 `counts.iframes` 与 `counts.shadowHosts`（非 0 说明当前注入方式取不到内容），
+> 再看 `currentSelectors` 中哪个为 0，最后用 `repeatedSiblingSignatures` 与
+> `messageSamples` 确定新的 `SELECTORS`。
+
+## 7. 页面结构变化时的标准修复流程
+
+0. 先跑上面 §6 的探针，拿到真实结构（不要盲改选择器）；
+1. 更新 `src/adapters/<provider>.ts` 的 `SELECTORS`
+   （支持候选列表，按优先级排列；候选必须精确，宁可失败也不产出脏数据）；
 2. 更新 `scripts/gen-fixtures.mjs` 中对应平台的 DOM 结构；
 3. `npm run fixtures` 重新生成 fixtures；
 4. `npm run test`（fixture 测试应通过）；

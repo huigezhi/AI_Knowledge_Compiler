@@ -9,43 +9,81 @@
 
 import type { ContentBlock, MessageRole } from "@akc/schema";
 
+/**
+ * 选择器规格：单个选择器，或**按优先级排列的候选列表**。
+ *
+ * 候选列表的作用是容纳平台的多套 DOM 变体（灰度、A/B、新旧版并存）：
+ * 按顺序取第一个有命中的，全部落空才算解析失败。
+ * 注意候选必须精确 —— 宁可失败也不能匹配到错误的元素产出脏数据。
+ */
+export type SelectorSpec = string | string[];
+
 /** 每个 Provider 必须提供的选择器常量表。 */
 export interface Selectors {
   /** 一轮对话（user + assistant）的外层容器 */
-  turn: string;
+  turn: SelectorSpec;
   /** 单条消息容器；缺失时退化为 turn */
-  message: string;
-  /** 消息角色来源：属性名（如 data-role / data-message-author-role）或选择器 */
-  roleAttr: string;
+  message: SelectorSpec;
+  /** 消息角色来源：属性名（可给多个候选，按顺序取第一个有效的） */
+  roleAttr: SelectorSpec;
   /** 消息正文容器 */
-  content: string;
+  content: SelectorSpec;
   /** 会话标题 */
-  title: string;
+  title: SelectorSpec;
   /** 历史会话列表项（用于批量同步） */
-  historyItem: string;
+  historyItem: SelectorSpec;
   /** 历史项标题 */
-  historyTitle: string;
+  historyTitle: SelectorSpec;
   /** 判断当前是否在会话详情页 */
-  conversationRoot: string;
+  conversationRoot: SelectorSpec;
 }
 
-export function queryAll(root: ParentNode, selector: string): Element[] {
-  return Array.from(root.querySelectorAll(selector));
+export function queryAll(root: ParentNode, selector: SelectorSpec): Element[] {
+  for (const candidate of Array.isArray(selector) ? selector : [selector]) {
+    const found = Array.from(root.querySelectorAll(candidate));
+    if (found.length > 0) return found;
+  }
+  return [];
 }
 
-export function queryFirst(root: ParentNode, selector: string): Element | null {
-  return root.querySelector(selector);
+export function queryFirst(root: ParentNode, selector: SelectorSpec): Element | null {
+  for (const candidate of Array.isArray(selector) ? selector : [selector]) {
+    const found = root.querySelector(candidate);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** 人类可读的选择器描述，用于错误信息与健康检查。 */
+export function describeSelector(selector: SelectorSpec): string {
+  return Array.isArray(selector) ? selector.join(" | ") : selector;
 }
 
 /** 从属性或回退策略推断角色；无法判断时返回 ``unknown``（不猜测）。 */
-export function inferRole(element: Element, roleAttr: string): MessageRole {
-  const raw = element.getAttribute(roleAttr) ?? element.closest(`[${roleAttr}]`)?.getAttribute(roleAttr);
-  const value = (raw ?? "").toLowerCase();
-  if (["user", "assistant", "system", "tool"].includes(value)) return value as MessageRole;
+const KNOWN_ROLES: ReadonlySet<string> = new Set(["user", "assistant", "system", "tool"]);
+
+export function inferRole(element: Element, roleAttr: SelectorSpec): MessageRole {
+  for (const attr of Array.isArray(roleAttr) ? roleAttr : [roleAttr]) {
+    const raw =
+      element.getAttribute(attr) ?? element.closest(`[${attr}]`)?.getAttribute(attr) ?? undefined;
+    const value = raw?.toLowerCase();
+    if (value && KNOWN_ROLES.has(value)) return value as MessageRole;
+    // 平台常用 "human"/"ai"/"bot" 之类的变体
+    if (value === "human") return "user";
+    if (value === "ai" || value === "bot" || value === "model" || value === "answer") return "assistant";
+  }
   // 次级策略：常见 class 命名
   const className = `${element.className ?? ""}`.toLowerCase();
-  if (className.includes("user") || className.includes("human")) return "user";
-  if (className.includes("assistant") || className.includes("bot") || className.includes("model")) {
+  if (className.includes("user") || className.includes("human") || className.includes("question")) {
+    return "user";
+  }
+  if (
+    className.includes("assistant") ||
+    className.includes("bot") ||
+    className.includes("model") ||
+    className.includes("answer") ||
+    className.includes("reply")
+  ) {
     return "assistant";
   }
   return "unknown";

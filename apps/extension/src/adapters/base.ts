@@ -16,7 +16,14 @@ import type {
 } from "@akc/schema";
 import { contentHash } from "@akc/schema/hash";
 import type { Selectors } from "./dom-utils";
-import { domSignature, extractBlocks, inferRole, queryAll, queryFirst } from "./dom-utils";
+import {
+  describeSelector,
+  domSignature,
+  extractBlocks,
+  inferRole,
+  queryAll,
+  queryFirst,
+} from "./dom-utils";
 
 export class AdapterParseError extends Error {
   constructor(
@@ -75,7 +82,7 @@ export function createDomAdapter(
     const nodes = messageNodes.length > 0 ? messageNodes : queryAll(root(), selectors.turn);
     if (nodes.length === 0) {
       throw new AdapterParseError(
-        `${def.displayName}: 未匹配到任何消息节点（selector: ${selectors.message}）`,
+        `${def.displayName}: 未匹配到任何消息节点（selector: ${describeSelector(selectors.message)}）`,
         def.id,
       );
     }
@@ -207,7 +214,7 @@ export function createDomAdapter(
             provider: def.id,
             status: "unhealthy",
             dom_version: signature,
-            message: `未匹配到消息节点（selector: ${selectors.turn}），请更新适配器与 fixtures`,
+            message: `未匹配到消息节点（selector: ${describeSelector(selectors.turn)}），请更新适配器与 fixtures`,
             checked_at: checkedAt,
           };
         }
