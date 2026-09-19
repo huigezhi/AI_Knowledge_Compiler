@@ -15,12 +15,13 @@ from akc.errors import AppError, ConflictError, NotFoundError
 from akc.repositories import audit, knowledge as kn_repo
 
 _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "candidate": {"review", "verified", "rejected", "archived"},
-    "review": {"verified", "rejected", "candidate", "archived"},
-    "verified": {"archived", "merged", "review"},
-    "rejected": {"candidate", "archived"},
+    "candidate": {"review", "verified", "rejected", "archived", "deleted"},
+    "review": {"verified", "rejected", "candidate", "archived", "deleted"},
+    "verified": {"archived", "merged", "review", "deleted"},
+    "rejected": {"candidate", "archived", "deleted"},
     "merged": {"verified"},  # 撤销合并
-    "archived": {"verified", "candidate"},
+    "archived": {"verified", "candidate", "deleted"},
+    "deleted": {"candidate"},  # 误删可恢复
 }
 
 

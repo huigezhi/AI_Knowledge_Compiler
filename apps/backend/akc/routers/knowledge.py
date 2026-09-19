@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from akc.deps import SessionDep
 from akc.errors import AppError, ErrorCode, NotFoundError
 from akc.repositories import knowledge as kn_repo
-from akc.schemas.api import MergeRequest, ReviewRequest
-from akc.services import review_service
+from akc.schemas.api import MergeRequest, ReclassifyRequest, ReviewRequest
+from akc.services import reclassify_service, review_service
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -18,6 +18,8 @@ _ACTION_TO_STATUS = {
     "reject": "rejected",
     "archive": "archived",
     "review": "review",
+    "delete": "deleted",
+    "restore": "candidate",  # 误删恢复：deleted -> candidate
 }
 
 
@@ -26,6 +28,7 @@ def list_knowledge(
     session: SessionDep,
     status: str | None = Query(default=None),
     knowledge_type: str | None = Query(default=None),
+    domain: str | None = Query(default=None),
     q: str | None = Query(default=None),
     include_inactive: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
@@ -35,6 +38,7 @@ def list_knowledge(
         session,
         status=status,
         knowledge_type=knowledge_type,
+        domain=domain,
         query=q,
         include_inactive=include_inactive,
         limit=limit,
@@ -60,6 +64,20 @@ def search(session: SessionDep, q: str = Query(min_length=1), limit: int = Query
         for row in rows
     ]
     return {"items": items, "query": q, "count": len(items)}
+
+
+@router.post("/reclassify")
+def reclassify(
+    payload: ReclassifyRequest, session: SessionDep
+) -> dict[str, object]:
+    """重新分类与归并：dry_run 返回预览，确认后 dry_run=False 执行。"""
+    plan_result = reclassify_service.plan(
+        session, domain=payload.domain, force=payload.force
+    )
+    if payload.dry_run:
+        return {**plan_result, "dry_run": True}
+    applied = reclassify_service.apply(session, plan_result)
+    return {**applied, "dry_run": False}
 
 
 @router.get("/{knowledge_id}")

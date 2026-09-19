@@ -63,6 +63,16 @@ class MergeRequest(BaseModel):
     reason: str = ""
 
 
+class ReclassifyRequest(BaseModel):
+    """重新分类与归并：先 dry_run 预览，确认后再 dry_run=False 执行。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    domain: str | None = None
+    force: bool = False
+    dry_run: bool = True
+
+
 class ObsidianSyncRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

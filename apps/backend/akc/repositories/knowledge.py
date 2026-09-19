@@ -11,8 +11,6 @@ from akc.db.models import Knowledge, KnowledgeLink, KnowledgeSource
 from akc.services.hasher import content_hash
 
 _ACTIVE_STATUSES = ("verified", "candidate", "review", "merged")
-
-
 def create(
     session: Session,
     *,
@@ -93,6 +91,7 @@ def list_knowledge(
     *,
     status: str | None = None,
     knowledge_type: str | None = None,
+    domain: str | None = None,
     include_inactive: bool = False,
     query: str | None = None,
     limit: int = 50,
@@ -109,6 +108,9 @@ def list_knowledge(
     if knowledge_type:
         stmt = stmt.where(Knowledge.knowledge_type == knowledge_type)
         count_stmt = count_stmt.where(Knowledge.knowledge_type == knowledge_type)
+    if domain:
+        stmt = stmt.where(Knowledge.domain == domain)
+        count_stmt = count_stmt.where(Knowledge.domain == domain)
     if query:
         like = f"%{query}%"
         clause = Knowledge.title.like(like) | Knowledge.summary.like(like)
@@ -135,7 +137,12 @@ def search_fts(session: Session, query: str, *, limit: int = 20) -> list[Knowled
     ids = [r[0] for r in rows]
     if not ids:
         return []
-    return list(session.scalars(select(Knowledge).where(Knowledge.id.in_(ids))).all())
+    # 已删除（deleted）的知识不参与检索：FTS 索引是独立表，删状态不会自动同步
+    return list(
+        session.scalars(
+            select(Knowledge).where(Knowledge.id.in_(ids)).where(Knowledge.status.in_(_ACTIVE_STATUSES))
+        ).all()
+    )
 
 
 def link_sources(
@@ -219,6 +226,7 @@ def to_dict(item: Knowledge, *, sources: list[str] | None = None) -> dict[str, A
         "title": item.title,
         "status": item.status,
         "knowledge_type": item.knowledge_type,
+        "domain": item.domain,
         "summary": item.summary,
         "markdown": item.markdown,
         "confidence": item.confidence,

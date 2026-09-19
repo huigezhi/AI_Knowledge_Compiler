@@ -122,11 +122,46 @@ export interface KnowledgeView {
   title: string;
   status: KnowledgeStatus;
   knowledge_type: string;
+  /** 主题域（Obsidian 子目录）。后端近期才输出，老版本后端可能没有此字段。 */
+  domain?: string | null;
   summary: string;
   confidence: number;
   source_message_ids: string[];
   obsidian_path: string | null;
   version: number;
+}
+
+/** 重新分类计划里的一条「换域」变更。 */
+export interface ReclassifyChange {
+  id: string;
+  title: string;
+  from: string | null;
+  to: string;
+  reason?: string;
+}
+
+/** 重新分类计划里的一条「合并」变更：drop 并入 keep（扁平字段名，与后端一致）。 */
+export interface ReclassifyMerge {
+  keep_id: string;
+  keep_title: string;
+  drop_id: string;
+  drop_title: string;
+  similarity?: number;
+}
+
+/** `POST /knowledge/reclassify` 的返回。dry_run=true 时为预览，false 时为执行结果。 */
+export interface ReclassifyResult {
+  dry_run: boolean;
+  /** 预览阶段：拟调整的域。执行阶段可能为空。 */
+  reclassify?: ReclassifyChange[];
+  /** 预览阶段：拟合并的条目。 */
+  merges?: ReclassifyMerge[];
+  total?: number;
+  note?: string;
+  /** 执行阶段：实际发生的变更数。 */
+  domain_changes?: number;
+  /** 执行阶段：实际合并的组数。 */
+  merges_applied?: number;
 }
 
 /**
@@ -205,10 +240,29 @@ export class AkcApiClient {
     return this.request<{ items: KnowledgeView[]; total: number }>(`/knowledge?${query.toString()}`);
   }
 
-  reviewKnowledge(id: string, action: "verify" | "reject" | "archive" | "review", reason = "") {
+  reviewKnowledge(
+    id: string,
+    action: "verify" | "reject" | "archive" | "review" | "delete" | "restore",
+    reason = "",
+  ) {
     return this.request<KnowledgeView>(`/knowledge/${encodeURIComponent(id)}/review`, {
       method: "POST",
       body: { action, reason },
+    });
+  }
+
+  /**
+   * 重新分类与归并。
+   * dry_run=true 只返回计划（不落库）；dry_run=false 由后端重新计算并应用。
+   */
+  reclassify(params: { domain?: string | null; force?: boolean; dry_run?: boolean } = {}) {
+    return this.request<ReclassifyResult>("/knowledge/reclassify", {
+      method: "POST",
+      body: {
+        domain: params.domain ?? null,
+        force: params.force ?? false,
+        dry_run: params.dry_run ?? true,
+      },
     });
   }
 

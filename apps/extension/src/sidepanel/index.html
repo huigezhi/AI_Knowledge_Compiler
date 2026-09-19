@@ -12,6 +12,8 @@
       <a class="link" href="../options/index.html" target="_blank">设置</a>
     </header>
 
+    <p id="error-line" class="error-line" hidden></p>
+
     <section class="card" id="provider-card">
       <div class="row">
         <span class="label">平台</span>
@@ -61,7 +63,8 @@
     <section class="card">
       <div class="card-head">
         <h2>编译结果</h2>
-        <button id="btn-write-obsidian" class="ghost">写入全部</button>
+        <button id="btn-write-obsidian" class="ghost">同步整个库</button>
+        <button id="btn-reclassify" class="ghost">重新分类</button>
       </div>
       <div id="compile-summary" class="stats">
         <span>识别 <b id="stat-items">0</b> 个知识</span>
@@ -69,17 +72,32 @@
         <span>已入库 <b id="stat-created">0</b></span>
       </div>
       <div id="job-stage" class="muted"></div>
+
+      <p id="reclassify-result" class="hint" hidden></p>
       <div class="actions">
-        <button id="btn-write-current" class="primary" disabled>一键写入 Obsidian</button>
+        <button id="btn-reclassify-apply" class="ghost" hidden>应用以上调整</button>
+      </div>
+
+      <div id="review-bar" class="review-bar" hidden>
+        <label class="pick"><input type="checkbox" id="chk-select-all" />全选</label>
+        <span id="review-selected" class="muted">已选 0 条</span>
+        <button id="btn-verify-selected" class="ghost">确认入选</button>
+        <button id="btn-reject-selected" class="ghost">驳回</button>
+        <button id="btn-delete-selected" class="ghost danger">删除</button>
+      </div>
+      <p class="hint">
+        「确认」= 认可并入库；「驳回」= 判定为噪音，移出待审核但仍保留（可再确认）；
+        「删除」= 彻底丢弃（可恢复）。删除会二次确认。
+      </p>
+
+      <ul id="knowledge-list" class="knowledge"></ul>
+
+      <div class="actions">
+        <button id="btn-write-current" class="primary" disabled>写入全部到 Obsidian</button>
+        <button id="btn-write-verified" class="ghost" disabled>仅写入已确认</button>
       </div>
       <p id="write-target" class="hint">先「保存 + 编译」一次，这里即可把本次结果一键写入 Obsidian。</p>
-      <ul id="knowledge-list" class="knowledge"></ul>
     </section>
-
-    <div id="error-banner" class="banner" hidden>
-      <span id="error-text"></span>
-      <button id="btn-retry" class="ghost">重试</button>
-    </div>
 
     <script type="module" src="./main.ts"></script>
   </body>
