@@ -120,6 +120,17 @@ def main(argv: list[str]) -> int:
         else:
             commits = resolve_commits(base_sha)
         print(f"自动展开待推送提交 {len(commits)} 个")
+
+    if not commits:
+        # 曾经踩过的坑：提交列表为空时仍然写状态文件，于是状态跑到真实远端之前，
+        # 之后每次都算出「0 个待推送」却打印成功 —— 提交被静默吞掉。
+        # 这里直接停下并保持状态不变，让问题可见。
+        print(
+            "没有待推送的提交。若你本地确实有未推送的提交，通常是状态文件超前了，\n"
+            "请显式指定：push_via_api.py <token> <base_sha> --local-base <本地上次已推送的 HEAD>"
+        )
+        return 0
+
     headers = {**HEADERS, "Authorization": f"Bearer {token}"}
 
     with httpx.Client(trust_env=False, timeout=60.0) as client:  # 直连，绕过环境代理
@@ -176,8 +187,16 @@ def main(argv: list[str]) -> int:
         if r.status_code != 200:
             print(f"ref 更新失败: {r.status_code} {r.text[:200]}")
             return 1
+
+        # 回读确认：光看 200 不够，引用可能没真正落上去
+        check = client.get(f"{BASE}/git/ref/heads/main", headers=headers)
+        landed = check.json().get("object", {}).get("sha") if check.status_code == 200 else None
+        if landed != current:
+            print(f"推送后校验失败：远端 refs/heads/main={landed}，期望 {current}")
+            return 1
+
         write_state(git("rev-parse", "HEAD").strip(), current)
-        print(json.dumps({"new_head": current}, ensure_ascii=False))
+        print(json.dumps({"new_head": current, "pushed": len(commits)}, ensure_ascii=False))
     return 0
 
 
