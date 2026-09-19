@@ -28,6 +28,38 @@ const HTTP_MESSAGE: Record<number, string> = {
   503: "本地服务尚未就绪。",
 };
 
+/**
+ * 后端错误码 → 面向用户的中文提示；返回 null 表示没有对应文案。
+ *
+ * 必须**集中在这里**：同一批错误码会经两条完全不同的路径到达用户 ——
+ *   1. HTTP 错误响应（ApiError.userMessage）
+ *   2. 异步任务失败（GET /jobs/{id} 的 error_code + error）
+ * 只覆盖其中一条，另一条就会把后端的英文原文直接甩给用户（看不懂、也不知道该点哪里）。
+ */
+export function humanizeBackendCode(code?: string | null): string | null {
+  switch (code) {
+    case "OBSIDIAN_VAULT_NOT_CONFIGURED":
+      // Vault 路径是**后端**（电脑上的 .env）配置，不在本扩展设置页里，
+      // 因此文案必须指向正确的位置，否则用户会像无头苍蝇一样在设置页里找。
+      return "还没连接 Obsidian 库。请在电脑上双击 scripts\\windows\\set-vault.bat 选择你的库，然后重试。";
+    case "SCHEMA_VALIDATION_FAILED":
+      return "采集结果不符合数据规范，可能是平台页面结构变化，请更新适配器后再试。";
+    case "CLAUDE_DISABLED":
+    case "COMPILER_DISABLED":
+    case "LLM_DISABLED":
+      // 「AI 编译」不是必须的：默认只保存原始对话。要生成知识笔记才需要配 LLM。
+      return "还没启用 AI 编译（保存原始对话不需要它）。若要提炼知识，请双击 scripts\\windows\\set-llm.bat 配置模型服务（支持 DeepSeek / Claude），它会自动写入配置并重启后端。";
+    case "CLAUDE_REQUEST_FAILED":
+      return "调用 AI 编译服务失败（网络/鉴权/限流）。请检查 .env 里的 AKC_LLM_BASE_URL、AKC_LLM_API_KEY 与 AKC_LLM_MODEL，并确认网络可达。";
+    case "CLAUDE_OUTPUT_INVALID":
+      return "AI 返回的内容不是合法 JSON，已丢弃本次结果（不会写入脏数据）。可重试或换用更强的模型。";
+    case "NOT_FOUND":
+      return "找不到对应记录，它可能已被删除。";
+    default:
+      return null;
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -40,31 +72,8 @@ export class ApiError extends Error {
 
   /** 面向用户的中文文案：后端英文 message → 可读提示。 */
   get userMessage(): string {
-    if (this.payload?.code === "OBSIDIAN_VAULT_NOT_CONFIGURED") {
-      // Vault 路径是**后端**（电脑上的 .env）配置，不在本扩展设置页里，
-      // 因此文案必须指向正确的位置，否则用户会像无头苍蝇一样在设置页里找。
-      return "还没连接 Obsidian 库。请在电脑上双击 scripts\\windows\\set-vault.bat 选择你的库，然后重试。";
-    }
-    if (this.payload?.code === "SCHEMA_VALIDATION_FAILED") {
-      return "采集结果不符合数据规范，可能是平台页面结构变化，请更新适配器后再试。";
-    }
-    if (
-      this.payload?.code === "CLAUDE_DISABLED" ||
-      this.payload?.code === "COMPILER_DISABLED" ||
-      this.payload?.code === "LLM_DISABLED"
-    ) {
-      // 「AI 编译」不是必须的：默认只保存原始对话。要生成知识笔记才需要配 LLM。
-      return "还没启用 AI 编译。保存原始对话不需要它；若要提炼知识，请在 apps\\backend\\.env 里配置 AKC_LLM_*（支持 Anthropic 或 DeepSeek 的 Anthropic 兼容端点）后重启后端。";
-    }
-    if (this.payload?.code === "CLAUDE_REQUEST_FAILED") {
-      return "调用 AI 编译服务失败（网络/鉴权/限流）。请检查 .env 里的 AKC_LLM_BASE_URL、AKC_LLM_API_KEY 与 AKC_LLM_MODEL，并确认网络可达。";
-    }
-    if (this.payload?.code === "CLAUDE_OUTPUT_INVALID") {
-      return "AI 返回的内容不是合法 JSON，已丢弃本次结果（不会写入脏数据）。可重试或换用更强的模型。";
-    }
-    if (this.payload?.code === "NOT_FOUND") {
-      return "找不到对应记录，它可能已被删除。";
-    }
+    const mapped = humanizeBackendCode(this.payload?.code);
+    if (mapped) return mapped;
     if (this.status === 401) {
       return HTTP_MESSAGE[401]!;
     }

@@ -24,6 +24,47 @@ def test_enqueue_is_idempotent(session: Session, settings: Settings) -> None:
     assert second["enqueued"] is False
 
 
+def test_failed_job_can_be_retried(session: Session, settings: Settings) -> None:
+    """失败任务必须能重跑：否则用户点「重试」拿回旧失败记录，永远恢复不了。
+
+    曾无条件按幂等键返回既有 job，于是编译失败后「保存 + 编译」「重试」都不再执行。
+    """
+    first = enqueue_job(
+        session, job_type="COMPILE_CONVERSATION", parts=("c1", "m1"), payload={}, settings=settings
+    )
+    job = job_repo.get(session, first["id"])
+    assert job is not None
+    job.status = "failed"
+    job.error = "boom"
+    job.error_code = "CLAUDE_OUTPUT_INVALID"
+    session.commit()
+
+    again = enqueue_job(
+        session, job_type="COMPILE_CONVERSATION", parts=("c1", "m1"), payload={}, settings=settings
+    )
+    assert again["enqueued"] is True  # 重新入队，而不是返回旧失败
+    assert again["status"] == "pending"
+    assert again["error"] is None
+    assert again["attempts"] == 0
+
+
+def test_succeeded_job_stays_idempotent(session: Session, settings: Settings) -> None:
+    """成功是终态：重复请求不应重做已完成的工作（否则会重复消耗 token）。"""
+    first = enqueue_job(
+        session, job_type="COMPILE_CONVERSATION", parts=("c2", "m1"), payload={}, settings=settings
+    )
+    job = job_repo.get(session, first["id"])
+    assert job is not None
+    job.status = "succeeded"
+    session.commit()
+
+    again = enqueue_job(
+        session, job_type="COMPILE_CONVERSATION", parts=("c2", "m1"), payload={}, settings=settings
+    )
+    assert again["enqueued"] is False
+    assert again["status"] == "succeeded"
+
+
 def test_retry_then_dead_letter(session: Session, settings: Settings) -> None:
     attempts = {"n": 0}
 

@@ -49,7 +49,8 @@ def run_merge_planning(
 ) -> dict[str, Any]:
     """让高能力模型判断冲突场景下的合并动作。"""
     prompt = build_merge_planner_prompt(existing, candidate)
-    raw = client.complete_json(SYSTEM_PROMPT, prompt, max_tokens=2048)
+    # 2048 太容易被截断成半个 JSON（截断后必然解析失败，白花钱还拿不到结果）
+    raw = client.complete_json(SYSTEM_PROMPT, prompt, max_tokens=8192)
     action = str(raw.get("action", "review")).lower()
     if action not in _MERGE_ACTIONS:
         action = "review"

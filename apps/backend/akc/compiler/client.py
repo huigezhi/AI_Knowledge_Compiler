@@ -66,7 +66,8 @@ class ClaudeClient:
     def model(self) -> str:
         return self._settings.model
 
-    def complete_json(self, system: str, user: str, *, max_tokens: int = 4096) -> dict[str, Any]:
+    # 默认上限调高：多条目抽取很容易超过 4096，一旦被截断就必然解析失败
+    def complete_json(self, system: str, user: str, *, max_tokens: int = 8192) -> dict[str, Any]:
         """调用模型并返回**已解析**的 JSON 对象。
 
         只返回 JSON；任何非 JSON 输出都视为 ``ClaudeOutputInvalidError``（不可自动重试）。
@@ -150,11 +151,19 @@ class ClaudeClient:
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError as exc:
+            # 只报"not valid JSON"没有任何可排查性：必须带上模型实际返回了什么。
+            # 最常见的原因是输出被 max_tokens 截断（cleaned 不以 } 结尾），
+            # 其次是模型在 JSON 里写了注释/尾逗号。把两者区分开，省一轮来回。
+            preview = text.strip()[:300]
+            truncated = not cleaned.rstrip().endswith("}")
+            hint = "，输出被截断（多半是 max_tokens 不足）" if truncated else ""
             get_logger().warning(
-                "claude_output_not_json", extra={"extra_fields": {"reason": str(exc)}}
+                "claude_output_not_json",
+                extra={"extra_fields": {"reason": str(exc), "truncated": truncated}},
             )
             raise ClaudeOutputInvalidError(
-                "claude output is not valid JSON", details={"reason": str(exc)}
+                f"claude output is not valid JSON{hint}: {exc}; 原始输出开头：{preview!r}",
+                details={"reason": str(exc), "preview": preview, "truncated": truncated},
             ) from exc
         if not isinstance(parsed, dict):
             raise ClaudeOutputInvalidError("claude output must be a JSON object")

@@ -9,7 +9,14 @@
  */
 
 import type { Conversation, ConversationSummary, ProviderId } from "@akc/schema";
-import { AkcApiClient, ApiError, OfflineError, type JobView, type KnowledgeView } from "@/shared/api-client";
+import {
+  AkcApiClient,
+  ApiError,
+  humanizeBackendCode,
+  OfflineError,
+  type JobView,
+  type KnowledgeView,
+} from "@/shared/api-client";
 import { setLogLevel } from "@/shared/logger";
 import { isMessage, type CrawlProgress, type MessageResponse } from "@/shared/messaging";
 import { loadSettings, type ExtensionSettings } from "@/shared/settings";
@@ -262,8 +269,13 @@ async function pollJob(jobId: string): Promise<JobView> {
     setText("job-stage", `任务 ${job.status} · 阶段：${stage} · 已尝试 ${job.attempts}/${job.max_attempts}`);
     if (job.status === "succeeded") return job;
     if (job.status === "failed" || job.status === "cancelled") {
-      // 注意 `??` 对空串不生效：后端任务可能带着空 error 字段失败
-      throw new Error(job.error?.trim() || "编译任务失败（原因未返回，请查看后端任务列表）");
+      // 任务失败要按 error_code 翻译：否则后端的英文原文会直接甩给用户。
+      // 注意 `??` 对空串不生效，空 error 字段必须先 trim 再判断。
+      const translated = humanizeBackendCode(job.error_code);
+      const raw = job.error?.trim() || "编译任务失败（原因未返回，请查看后端任务列表）";
+      // 中文指引 + 原始详情都保留：只给中文会丢掉排查线索（比如模型输出片段），
+      // 只给英文原文用户又看不懂。
+      throw new Error(translated ? `${translated}\n详情：${raw}` : raw);
     }
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }

@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AkcApiClient, ApiError, OfflineError } from "../api-client";
+import { AkcApiClient, ApiError, humanizeBackendCode, OfflineError } from "../api-client";
 
 const fetchMock = vi.fn();
 
@@ -84,5 +84,49 @@ describe("AkcApiClient", () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { status: "ok" }));
     await client().health();
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:38127/api/v1/health");
+  });
+});
+
+/**
+ * 错误码翻译必须能覆盖**异步任务失败**这条路径。
+ *
+ * 曾经只挂在 HTTP 错误响应上，于是 GET /jobs 返回的 error（后端英文原文）
+ * 被直接甩给用户 —— 本用例锁住这个回归。
+ */
+describe("humanizeBackendCode", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("LLM 未启用时给出可执行指引，而不是后端英文原文", () => {
+    const text = humanizeBackendCode("LLM_DISABLED");
+    expect(text).toBeTruthy();
+    expect(text).toContain("set-llm.bat");
+    expect(text).not.toContain("AKC_LLM_ENABLED");
+  });
+
+  it("未知错误码返回 null，交由调用方回落到原始 message", () => {
+    expect(humanizeBackendCode("SOMETHING_ELSE")).toBeNull();
+    expect(humanizeBackendCode(null)).toBeNull();
+    expect(humanizeBackendCode(undefined)).toBeNull();
+  });
+
+  it("HTTP 错误响应也走同一份翻译", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(400, { error: { code: "LLM_DISABLED", message: "llm compiler is disabled", retryable: false } }),
+    );
+    const apiClient = new AkcApiClient({ backendUrl: "http://127.0.0.1:38127", authToken: "" });
+    try {
+      await apiClient.createCompileJob("conv_1");
+      expect.unreachable("应当抛错");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).userMessage).toContain("set-llm.bat");
+    }
   });
 });

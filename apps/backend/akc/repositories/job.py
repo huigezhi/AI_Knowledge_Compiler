@@ -13,6 +13,10 @@ from akc.db.models import Job
 _TERMINAL = ("succeeded", "failed", "cancelled")
 
 
+# 失败与取消可以重跑；成功是终态，保持幂等
+_RETRYABLE_TERMINAL = ("failed", "cancelled")
+
+
 def enqueue(
     session: Session,
     *,
@@ -23,11 +27,29 @@ def enqueue(
     max_attempts: int = 3,
     run_at: datetime | None = None,
 ) -> tuple[Job, bool]:
-    """按幂等键入队。若已存在同名幂等键且尚未终态，则返回既有 job。"""
+    """按幂等键入队。若已存在同名幂等键且尚未终态，则返回既有 job。
+
+    关键：**失败/取消属于终态，必须允许重跑**。
+    早期实现无条件返回既有 job，于是编译失败后再点「保存 + 编译」或「重试」，
+    拿回的永远是那条旧失败记录、worker 也不会再执行 —— 用户彻底卡死，
+    只能换模型或换会话才可能绕开。这里把终态失败重置回 pending。
+    成功（succeeded）保持幂等：不重复做已完成的工作。
+    """
     existing = session.scalars(
         select(Job).where(Job.idempotency_key == idempotency_key)
     ).one_or_none()
     if existing is not None:
+        if existing.status in _RETRYABLE_TERMINAL:
+            existing.status = "pending"
+            existing.attempts = 0
+            existing.stage = None
+            existing.error = None
+            existing.error_code = None
+            existing.result_json = {}
+            existing.finished_at = None
+            existing.next_run_at = run_at or datetime.now(timezone.utc)
+            session.flush()
+            return existing, True
         return existing, False
 
     job = Job(
