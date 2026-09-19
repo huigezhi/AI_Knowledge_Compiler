@@ -92,7 +92,41 @@ AI_Knowledge_Compiler/
 > 完整的首次上手流程（含令牌配置、采集、编译、写入、审核与排查）见
 > [docs/usage.md](docs/usage.md)。以下是最小命令集。
 
-### 4.1 本地后端
+### 4.1 一键安装
+
+复制对应系统的一行命令到终端运行，从克隆代码到验证完成全自动，无需手动 clone：
+
+**Windows（PowerShell，推荐）**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compiler/main/install.ps1 | iex"
+```
+
+命令直接从网络执行，不在本地留下安装脚本。也可以[下载 install.ps1](https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compiler/main/install.ps1) 后执行，或使用 [install.bat](https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compiler/main/install.bat)（双击运行）。
+
+**Windows（cmd）**
+
+```bat
+curl -fsSL -o %TEMP%\install.bat https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compiler/main/install.bat && %TEMP%\install.bat
+```
+
+**Ubuntu / Debian**
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/huigezhi/AI_Knowledge_Compiler/main/install.sh)
+```
+
+脚本做的事：检查环境 → 克隆/更新代码到 `~/ai-knowledge-compiler`（Linux 装到 `/opt/akc`）→
+装依赖 → 构建 Chrome 扩展 → 生成 `.env` → 启动后端 → 健康检查。
+
+### 4.1.1 前置要求
+
+- **Windows**：[git](https://git-scm.com/download/win) + [Python 3.12+](https://www.python.org/downloads/)（安装时勾选 *Add python.exe to PATH*）。
+  [Node.js](https://nodejs.org) 可选 —— 没有它只装后端，装好后重跑脚本即可补建扩展。
+- **Ubuntu / Debian**：无（脚本会用 apt 自动安装缺失的 git / python3 / venv / pip）。
+  Linux 版安装为 systemd 服务，一般装在 VPS 上，本地 Chrome 扩展走 SSH 隧道连接。
+
+### 4.2 本地后端
 
 ```bash
 cd apps/backend
@@ -110,7 +144,7 @@ curl http://127.0.0.1:38127/api/v1/health
 
 启动时会在 `AKC_DATA_DIR` 生成/读取本地 token（`auth_token` 文件），扩展的每次写请求都必须带 `X-AKC-Token`。
 
-### 4.2 Chrome 扩展
+### 4.3 Chrome 扩展
 
 ```bash
 cd apps/extension
@@ -128,7 +162,7 @@ npm run build         # 产物在 apps/extension/dist
    （`AKC_VAULT_PATH`、`AKC_LLM_API_KEY`、`AKC_LLM_MODEL`、`AKC_LLM_PROVIDER`），重启后端生效
 5. 打开任意受支持平台 → 打开 Side Panel → 「保存当前对话」
 
-### 4.3 一键脚本（推荐：一次配置，永久服务）
+### 4.4 一键脚本（推荐：一次配置，永久服务）
 
 不想每次手敲命令，就用 `scripts/` 下的一键脚本 —— 双击即可：
 
@@ -144,7 +178,7 @@ npm run build         # 产物在 apps/extension/dist
 后端放到 VPS 后，扩展推荐用 **SSH 隧道** 连接（扩展配置零改动、流量加密）：
 `ssh -N -L 38127:127.0.0.1:38127 user@your-vps`
 
-### 4.4 常用命令
+### 4.5 常用命令
 
 ```bash
 make bootstrap   # 装齐依赖
