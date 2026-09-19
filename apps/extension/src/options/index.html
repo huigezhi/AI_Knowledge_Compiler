@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>AKC · 设置</title>
+    <style>
+      body {
+        margin: 0 auto;
+        padding: 24px;
+        max-width: 680px;
+        font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        background: #16181d;
+        color: #e6e8ee;
+      }
+      h1 { font-size: 20px; }
+      fieldset {
+        border: 1px solid #333844;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        padding: 12px 16px;
+      }
+      legend { color: #9aa3b2; padding: 0 6px; }
+      label { display: block; margin: 8px 0 4px; }
+      input[type="text"], input[type="number"], select {
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid #333844;
+        background: #1e2128;
+        color: #e6e8ee;
+      }
+      .hint { color: #9aa3b2; font-size: 12px; }
+      button {
+        padding: 6px 14px;
+        border-radius: 6px;
+        border: 1px solid #3b6bb5;
+        background: #2b4a7d;
+        color: #fff;
+        cursor: pointer;
+      }
+      #status { margin-top: 10px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>AI Knowledge Compiler · 设置</h1>
+
+    <fieldset>
+      <legend>本地服务</legend>
+      <label for="backend-url">后端地址</label>
+      <input id="backend-url" type="text" placeholder="http://127.0.0.1:38127" />
+      <label for="auth-token">本地访问令牌（X-AKC-Token）</label>
+      <input id="auth-token" type="text" placeholder="留空表示后端未启用令牌校验" />
+      <p class="hint">
+        令牌用于阻止浏览器里其它网页伪造本地请求；可在后端 <code>data/auth_token</code> 文件中查看。
+      </p>
+      <button id="btn-test">测试连接</button>
+      <div id="status"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>采集策略</legend>
+      <label for="batch-size">批量同步单次上限</label>
+      <input id="batch-size" type="number" min="1" max="200" />
+      <label><input id="write-raw" type="checkbox" /> 保存时同时把 Raw 写入 Obsidian</label>
+      <label><input id="auto-compile" type="checkbox" /> 保存后自动进入编译队列</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>诊断</legend>
+      <label for="log-level">日志级别</label>
+      <select id="log-level">
+        <option value="debug">debug</option>
+        <option value="info">info</option>
+        <option value="warn">warn</option>
+        <option value="error">error</option>
+      </select>
+      <p class="hint">
+        Claude API Key 与 Vault 路径在后端配置（<code>apps/backend/.env</code>），
+        扩展不保存任何密钥。
+      </p>
+    </fieldset>
+
+    <button id="btn-save">保存设置</button>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

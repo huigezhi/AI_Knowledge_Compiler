@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AKC · Side Panel</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">AKC</div>
+      <a class="link" href="../options/index.html" target="_blank">设置</a>
+    </header>
+
+    <section class="card" id="provider-card">
+      <div class="row">
+        <span class="label">平台</span>
+        <span id="provider-name" class="value">检测中…</span>
+      </div>
+      <div class="row">
+        <span class="label">当前会话</span>
+        <span id="conversation-title" class="value">—</span>
+      </div>
+      <div class="row">
+        <span class="label">适配器</span>
+        <span id="adapter-health" class="value">—</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="actions">
+        <button id="btn-save" class="primary">保存当前</button>
+        <button id="btn-save-compile">保存 + 编译</button>
+        <button id="btn-health" class="ghost">健康检查</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>历史会话</h2>
+        <button id="btn-load-history" class="ghost">加载</button>
+      </div>
+      <div class="actions">
+        <button id="btn-select-all" class="ghost">全选</button>
+        <button id="btn-sync" class="primary">批量同步</button>
+      </div>
+      <ul id="history-list" class="history"></ul>
+      <p id="sync-status" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>编译结果</h2>
+        <button id="btn-write-obsidian" class="ghost">写入 Obsidian</button>
+      </div>
+      <div id="compile-summary" class="stats">
+        <span>识别 <b id="stat-items">0</b> 个知识</span>
+        <span>待审核 <b id="stat-review">0</b></span>
+        <span>已入库 <b id="stat-created">0</b></span>
+      </div>
+      <div id="job-stage" class="muted"></div>
+      <ul id="knowledge-list" class="knowledge"></ul>
+    </section>
+
+    <div id="error-banner" class="banner" hidden>
+      <span id="error-text"></span>
+      <button id="btn-retry" class="ghost">重试</button>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
