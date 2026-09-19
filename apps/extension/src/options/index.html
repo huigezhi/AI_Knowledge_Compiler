@@ -30,6 +30,7 @@
         color: #e6e8ee;
       }
       .hint { color: #9aa3b2; font-size: 12px; }
+      .inline { width: 68px; }
       button {
         padding: 6px 14px;
         border-radius: 6px;
@@ -81,7 +82,20 @@
 
     <fieldset>
       <legend>采集策略</legend>
-      <label for="batch-size">批量同步单次上限</label>
+
+      <label><input id="auto-save" type="checkbox" /> <strong>自动保存当前会话</strong></label>
+      <p class="hint">
+        开启后：你在这个平台的会话内容一有变化，停手
+        <input id="auto-save-delay" type="number" min="1" max="600" class="inline" />
+        秒就自动归档，<strong>不用再点按钮</strong>。
+        连续对话（含 AI 流式输出）期间不会被打断。
+      </p>
+
+      <label><input id="crawl-skip-existing" type="checkbox" /> 自动同步历史时跳过已入库会话</label>
+      <label for="crawl-item-timeout">单个会话最长等待（秒）</label>
+      <input id="crawl-item-timeout" type="number" min="5" max="120" />
+
+      <label for="batch-size">自动同步历史的数量上限</label>
       <input id="batch-size" type="number" min="1" max="200" />
       <label><input id="write-raw" type="checkbox" /> 保存时同时把 Raw 写入 Obsidian</label>
       <label><input id="auto-compile" type="checkbox" /> 保存后自动进入编译队列</label>

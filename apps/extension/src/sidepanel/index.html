@@ -25,6 +25,10 @@
         <span class="label">适配器</span>
         <span id="adapter-health" class="value">—</span>
       </div>
+      <div class="row">
+        <span class="label">自动保存</span>
+        <span id="autosave-status" class="value">—</span>
+      </div>
     </section>
 
     <section class="card">
@@ -41,9 +45,14 @@
         <button id="btn-load-history" class="ghost">加载</button>
       </div>
       <div class="actions">
-        <button id="btn-select-all" class="ghost">全选</button>
-        <button id="btn-sync" class="primary">批量同步</button>
+        <button id="btn-crawl" class="primary">自动同步历史</button>
+        <button id="btn-crawl-cancel" class="ghost" hidden>取消</button>
       </div>
+      <p class="hint">
+        「自动同步历史」会在这个标签页里依次打开每个历史会话、采集完再回到你原来的页面，
+        所以<strong>没点开过的会话也能采到</strong>。期间请勿操作该标签页；可随时取消。
+      </p>
+      <div id="crawl-progress" class="muted"></div>
       <ul id="history-list" class="history"></ul>
       <p id="sync-status" class="muted"></p>
     </section>

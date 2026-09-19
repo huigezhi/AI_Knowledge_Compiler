@@ -50,7 +50,8 @@ export class ApiError extends Error {
     }
     if (
       this.payload?.code === "CLAUDE_DISABLED" ||
-      this.payload?.code === "COMPILER_DISABLED"
+      this.payload?.code === "COMPILER_DISABLED" ||
+      this.payload?.code === "LLM_DISABLED"
     ) {
       // 「AI 编译」不是必须的：默认只保存原始对话。要生成知识笔记才需要配 LLM。
       return "还没启用 AI 编译。保存原始对话不需要它；若要提炼知识，请在 apps\\backend\\.env 里配置 AKC_LLM_*（支持 Anthropic 或 DeepSeek 的 Anthropic 兼容端点）后重启后端。";
@@ -119,10 +120,17 @@ export interface KnowledgeView {
   version: number;
 }
 
+/**
+ * 后端 `/conversations` 返回的会话条目。
+ *
+ * 字段名必须与后端一致（后端用 `provider` + `provider_conversation_id`）；
+ * 早期这里写成了 `provider_id` / `external_id`，与实际响应不符，
+ * 会让「按 provider_conversation_id 去重」之类的逻辑静默拿不到值。
+ */
 export interface ConversationView {
   id: string;
-  provider_id: string;
-  external_id: string;
+  provider: string;
+  provider_conversation_id: string;
   title: string;
   url: string | null;
   content_hash: string;

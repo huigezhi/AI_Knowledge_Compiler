@@ -10,8 +10,8 @@
 
 import type { Conversation, ConversationSummary, ProviderId } from "@akc/schema";
 import { AkcApiClient, ApiError, OfflineError, type JobView, type KnowledgeView } from "@/shared/api-client";
-import { logger, setLogLevel } from "@/shared/logger";
-import type { MessageResponse } from "@/shared/messaging";
+import { setLogLevel } from "@/shared/logger";
+import { isMessage, type CrawlProgress, type MessageResponse } from "@/shared/messaging";
 import { loadSettings, type ExtensionSettings } from "@/shared/settings";
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -35,7 +35,6 @@ interface State {
   api: AkcApiClient;
   provider: ProviderId | null;
   history: ConversationSummary[];
-  selected: Set<string>;
   lastConversationId: string | null;
   knowledgeIds: string[];
   lastAction: (() => Promise<void>) | null;
@@ -46,7 +45,6 @@ const state: State = {
   api: new AkcApiClient({ backendUrl: "", authToken: "" }),
   provider: null,
   history: [],
-  selected: new Set(),
   lastConversationId: null,
   knowledgeIds: [],
   lastAction: null,
@@ -139,7 +137,6 @@ async function loadHistory(): Promise<void> {
   }
   if (!("items" in response)) return;
   state.history = response.items;
-  state.selected.clear();
   renderHistory();
   setText("sync-status", `已加载 ${state.history.length} 条历史会话`);
 }
@@ -149,75 +146,90 @@ function renderHistory(): void {
   list.innerHTML = "";
   for (const item of state.history) {
     const li = document.createElement("li");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = state.selected.has(item.provider_conversation_id);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) state.selected.add(item.provider_conversation_id);
-      else state.selected.delete(item.provider_conversation_id);
-    });
     const label = document.createElement("span");
     label.textContent = item.title;
-    li.append(checkbox, label);
+    li.append(label);
     list.append(li);
   }
 }
 
-async function batchSync(): Promise<void> {
-  clearError();
-  if (state.selected.size === 0) {
-    showError("请先勾选要同步的历史会话");
+// ------------------------------------------------------------------ 自动遍历
+function renderCrawlProgress(progress: CrawlProgress): void {
+  const cancel = el<HTMLButtonElement>("btn-crawl-cancel");
+  const crawlBtn = el<HTMLButtonElement>("btn-crawl");
+  cancel.hidden = !progress.running;
+  crawlBtn.disabled = progress.running;
+
+  if (!progress.running && progress.done === 0 && !progress.finishedAt) {
+    setText("crawl-progress", "");
+    renderAutoSaveStatus(progress);
     return;
   }
-  const targets = state.history.filter((item) => state.selected.has(item.provider_conversation_id));
-  let ok = 0;
-  let failed = 0;
-  const batch = targets.slice(0, state.settings.batchSize);
-  const run = await state.api.createSyncRun(String(state.provider ?? "unknown"), [
-    ...state.selected,
-  ]);
-  for (const [index, item] of batch.entries()) {
-    setText("sync-status", `同步中：${index + 1}/${batch.length} · 成功 ${ok} · 失败 ${failed}`);
-    try {
-      const conversation = await fetchConversationById(item.provider_conversation_id);
-      await state.api.importConversation(conversation, {
-        write_raw_to_obsidian: state.settings.writeRawToObsidian,
-        compile: false,
-      });
-      ok += 1;
-    } catch (error) {
-      failed += 1;
-      logger.warn("batch_sync_item_failed", { id: item.provider_conversation_id, error: String(error) });
+
+  if (progress.running) {
+    const current = progress.current ? ` · 正在处理「${progress.current}」` : "";
+    setText(
+      "crawl-progress",
+      `同步中：${progress.done}/${progress.total} · 成功 ${progress.ok} · 失败 ${progress.failed}${current}`,
+    );
+  } else {
+    const tail = progress.cancelled
+      ? "（已取消）"
+      : `完成 · 成功 ${progress.ok} · 失败 ${progress.failed} · 跳过 ${progress.skipped}（已存在）`;
+    setText("crawl-progress", `历史同步结束：${tail}`);
+    if (progress.failed > 0 && progress.lastError) {
+      showError(`有 ${progress.failed} 条未采集成功，最后一条错误：${progress.lastError}`, startCrawl);
     }
   }
-  await state.api.finishSyncRun(run.id, { total: batch.length, ok, failed });
-  setText("sync-status", `同步完成：成功 ${ok} · 失败 ${failed} · 共 ${batch.length} 条`);
-  if (failed > 0) showError(`${failed} 条同步失败，原始数据未受影响，可重试。`, batchSync);
+  renderAutoSaveStatus(progress);
 }
 
-/**
- * 批量同步取会话。
- *
- * 有的平台（智谱清言）历史列表里没有任何会话 ID，只能用 `title:<标题>` 占位 ID，
- * 因此除了 ID 相等，还接受「标题相等」的匹配。
- */
-async function fetchConversationById(id: string): Promise<Conversation> {
-  const response = await toBackground({ type: "AKC/FETCH_CURRENT" });
-  if (!response.ok) throw new Error(response.message);
-  if (!("conversation" in response)) throw new Error("content script 未返回会话数据");
-  const conversation = response.conversation;
-  const expectedTitle = id.startsWith("title:") ? id.slice("title:".length) : null;
-  const matched = expectedTitle
-    ? conversation.title === expectedTitle
-    : conversation.provider_conversation_id === id;
-  if (!matched) {
-    throw new Error(
-      expectedTitle
-        ? `请先打开标题为「${expectedTitle}」的会话再同步（当前是「${conversation.title}」）`
-        : `请先打开会话 ${id} 再同步（当前页面是 ${conversation.provider_conversation_id}）`,
-    );
+function renderAutoSaveStatus(progress: CrawlProgress): void {
+  const node = el("autosave-status");
+  if (!state.settings.autoSave) {
+    node.textContent = "已关闭（可在设置页开启）";
+    node.style.color = "#ffb86b";
+    return;
   }
-  return conversation;
+  if (!progress.lastAutoSaveAt) {
+    node.textContent = `开启中 · 停手 ${state.settings.autoSaveDelaySeconds} 秒后自动保存`;
+    node.style.color = "#9aa4b2";
+    return;
+  }
+  const seconds = Math.max(0, Math.round((Date.now() - progress.lastAutoSaveAt) / 1000));
+  const ago = seconds < 60 ? `${seconds} 秒前` : `${Math.round(seconds / 60)} 分钟前`;
+  node.textContent = `开启中 · 上次保存 ${ago}${progress.lastAutoSaveTitle ? `（${progress.lastAutoSaveTitle}）` : ""}`;
+  node.style.color = "#7ee787";
+}
+
+async function startCrawl(): Promise<void> {
+  clearError();
+  const response = await toBackground({ type: "AKC/CRAWL_START", limit: state.settings.batchSize * 10 });
+  if (!response.ok) {
+    showError(response.message, startCrawl);
+    return;
+  }
+  if ("crawl" in response) renderCrawlProgress(response.crawl);
+}
+
+async function cancelCrawl(): Promise<void> {
+  const response = await toBackground({ type: "AKC/CRAWL_CANCEL" });
+  if ("crawl" in response) renderCrawlProgress(response.crawl);
+}
+
+/** 侧边栏打开时订阅后台推送的进度。 */
+function subscribeProgress(): void {
+  chrome.runtime.onMessage.addListener((raw) => {
+    if (isMessage(raw) && raw.type === "AKC/CRAWL_PROGRESS") {
+      renderCrawlProgress(raw.progress);
+    }
+    return false;
+  });
+}
+
+async function refreshCrawlStatus(): Promise<void> {
+  const response = await toBackground({ type: "AKC/CRAWL_STATUS" });
+  if ("crawl" in response) renderCrawlProgress(response.crawl);
 }
 
 // ------------------------------------------------------------------ 编译
@@ -313,11 +325,8 @@ function wire(): void {
   el("btn-save-compile").addEventListener("click", () => void saveCurrent(true));
   el("btn-health").addEventListener("click", () => void detectProvider());
   el("btn-load-history").addEventListener("click", () => void loadHistory());
-  el("btn-sync").addEventListener("click", () => void batchSync());
-  el("btn-select-all").addEventListener("click", () => {
-    state.selected = new Set(state.history.map((item) => item.provider_conversation_id));
-    renderHistory();
-  });
+  el("btn-crawl").addEventListener("click", () => void startCrawl());
+  el("btn-crawl-cancel").addEventListener("click", () => void cancelCrawl());
   el("btn-write-obsidian").addEventListener("click", () => void writeToObsidian());
   el("btn-retry").addEventListener("click", () => {
     if (state.lastAction) void state.lastAction();
@@ -332,6 +341,7 @@ async function boot(): Promise<void> {
     authToken: state.settings.authToken,
   });
   wire();
+  subscribeProgress();
   await detectProvider();
   try {
     await state.api.health();
@@ -339,6 +349,7 @@ async function boot(): Promise<void> {
     showError(humanizeError(error), boot);
     return;
   }
+  await refreshCrawlStatus();
   await refreshKnowledge();
 }
 

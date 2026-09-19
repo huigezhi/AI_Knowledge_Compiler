@@ -14,6 +14,10 @@ function fill(settings: ExtensionSettings): void {
   el<HTMLInputElement>("backend-url").value = settings.backendUrl;
   el<HTMLInputElement>("auth-token").value = settings.authToken;
   el<HTMLInputElement>("batch-size").value = String(settings.batchSize);
+  el<HTMLInputElement>("auto-save").checked = settings.autoSave;
+  el<HTMLInputElement>("auto-save-delay").value = String(settings.autoSaveDelaySeconds);
+  el<HTMLInputElement>("crawl-skip-existing").checked = settings.crawlSkipExisting;
+  el<HTMLInputElement>("crawl-item-timeout").value = String(settings.crawlItemTimeoutSeconds);
   el<HTMLInputElement>("write-raw").checked = settings.writeRawToObsidian;
   el<HTMLInputElement>("auto-compile").checked = settings.autoCompile;
   el<HTMLSelectElement>("log-level").value = settings.logLevel;
@@ -24,6 +28,11 @@ function collect(): Partial<ExtensionSettings> {
     backendUrl: el<HTMLInputElement>("backend-url").value.trim() || "http://127.0.0.1:38127",
     authToken: el<HTMLInputElement>("auth-token").value.trim(),
     batchSize: Number(el<HTMLInputElement>("batch-size").value) || 20,
+    autoSave: el<HTMLInputElement>("auto-save").checked,
+    // 去抖时长必须 >=1 秒：0 会让流式输出的每一帧都触发一次采集
+    autoSaveDelaySeconds: Math.max(1, Number(el<HTMLInputElement>("auto-save-delay").value) || 15),
+    crawlSkipExisting: el<HTMLInputElement>("crawl-skip-existing").checked,
+    crawlItemTimeoutSeconds: Math.min(120, Math.max(5, Number(el<HTMLInputElement>("crawl-item-timeout").value) || 20)),
     writeRawToObsidian: el<HTMLInputElement>("write-raw").checked,
     autoCompile: el<HTMLInputElement>("auto-compile").checked,
     logLevel: el<HTMLSelectElement>("log-level").value as ExtensionSettings["logLevel"],
