@@ -1,0 +1,22 @@
+{
+  "name": "@akc/schema",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Universal Conversation Schema + compiler output contracts shared by the AKC extension and backend",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./hash": "./src/hash.ts",
+    "./schema/universal-conversation.schema.json": "./schema/universal-conversation.schema.json",
+    "./schema/compiler-output.schema.json": "./schema/compiler-output.schema.json"
+  },
+  "files": [
+    "src",
+    "schema"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/huigezhi/AI_Knowledge_Compiler/blob/main/packages/schema/schema/universal-conversation.schema.json",
+  "title": "UniversalConversation",
+  "description": "Universal Conversation Schema v1 — 扩展与后端之间唯一的会话交换格式。",
+  "type": "object",
+  "required": [
+    "id",
+    "provider",
+    "provider_conversation_id",
+    "title",
+    "messages",
+    "content_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "provider": { "type": "string", "minLength": 1 },
+    "provider_conversation_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "url": { "type": "string" },
+    "model": { "type": "string" },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "raw_payload_ref": { "type": "string" },
+    "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "schema_version": { "type": "string" },
+    "adapter_version": { "type": "string" },
+    "messages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Message" }
+    }
+  },
+  "$defs": {
+    "ContentBlock": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "code" },
+            "language": { "type": "string" },
+            "text": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "image" },
+            "local_ref": { "type": "string" },
+            "source_url": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "file" },
+            "local_ref": { "type": "string" },
+            "name": { "type": "string" },
+            "mime": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Message": {
+      "type": "object",
+      "required": ["id", "conversation_id", "role", "content", "sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "provider_message_id": { "type": "string" },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["user", "assistant", "system", "tool", "unknown"] },
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContentBlock" }
+        },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "created_at": { "type": "string" },
+        "parent_message_id": { "type": "string" },
+        "model": { "type": "string" },
+        "metadata": { "type": "object" },
+        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}
