@@ -159,24 +159,25 @@ async function navigateAndFetch(
 }
 
 async function runCrawl(tabId: number, limit: number, skipExisting: boolean | undefined): Promise<void> {
-  const settings = await loadSettings();
-  const useSkipExisting = skipExisting ?? settings.crawlSkipExisting;
-  const api = await clientFor(settings);
-
-  const tab = await chrome.tabs.get(tabId);
-  crawl.originalUrl = tab.url ?? null;
-  crawl.tabId = tabId;
-  crawl.progress = {
-    running: true,
-    total: 0,
-    done: 0,
-    ok: 0,
-    failed: 0,
-    skipped: 0,
-  };
-  broadcastProgress();
-
+  // 整个函数必须从头到尾在 try 里：fire-and-forget 调用（void runCrawl）
+  // 抛出的任何异常都会变成未处理拒绝，被 Chrome 计入扩展页的「错误」按钮
   try {
+    const settings = await loadSettings();
+    const useSkipExisting = skipExisting ?? settings.crawlSkipExisting;
+    const api = await clientFor(settings);
+
+    const tab = await chrome.tabs.get(tabId);
+    crawl.originalUrl = tab.url ?? null;
+    crawl.tabId = tabId;
+    crawl.progress = {
+      running: true,
+      total: 0,
+      done: 0,
+      ok: 0,
+      failed: 0,
+      skipped: 0,
+    };
+    broadcastProgress();
     const listed = (await toContentScript(tabId, {
       type: "AKC/LIST_CONVERSATIONS",
       limit,
@@ -248,7 +249,9 @@ async function runCrawl(tabId: number, limit: number, skipExisting: boolean | un
     }
   } catch (error) {
     crawl.progress.lastError = error instanceof Error ? error.message : String(error);
-    logger.error("crawl_failed", { error: crawl.progress.lastError });
+    // 预期内的失败（页面失联/遍历失败）已在 UI 里给用户提示，
+    // 用 error 级别会把 chrome://extensions 的「错误」按钮点红，误导为扩展崩溃
+    logger.warn("crawl_failed", { error: crawl.progress.lastError });
   } finally {
     // 无论成功、失败还是取消，都把标签页还给使用者
     if (crawl.originalUrl) {
@@ -358,7 +361,8 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
       sendResponse(result ?? { ok: false, code: "NO_RESPONSE", message: "content script 未响应" });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
-      logger.error("background_message_failed", { type: message.type, error: raw });
+      // 同上：这是已处理并提示用户的失败，warn 足够
+      logger.warn("background_message_failed", { type: message.type, error: raw });
       // 扩展更新后旧页面里的 content script 会失联（"Receiving end does not exist"），
       // 这时的正确动作是刷新平台页面，而不是笼统的"通信失败"
       const stale = /receiving end|message port|frame with id/i.test(raw);
