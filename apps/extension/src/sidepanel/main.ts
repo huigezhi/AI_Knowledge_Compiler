@@ -59,7 +59,11 @@ function el<T extends HTMLElement>(id: string): T {
 
 function showError(message: string, retry: (() => Promise<void>) | null = null): void {
   const banner = el("error-banner");
-  el("error-text").textContent = message;
+  // 空消息不允许渲染成一块没有文字的红条：那比不提示更糟（用户完全不知道发生了什么）。
+  // 已知来源：后端任务失败的 error 字段可能为空串（`new Error("")`）。
+  const text = (message ?? "").trim();
+  el("error-text").textContent =
+    text || "发生了未知错误。请点「重试」；若反复出现，请重新打开侧边栏，并告诉我当时的操作。";
   el<HTMLButtonElement>("btn-retry").hidden = retry === null;
   state.lastAction = retry;
   banner.hidden = false;
@@ -258,7 +262,8 @@ async function pollJob(jobId: string): Promise<JobView> {
     setText("job-stage", `任务 ${job.status} · 阶段：${stage} · 已尝试 ${job.attempts}/${job.max_attempts}`);
     if (job.status === "succeeded") return job;
     if (job.status === "failed" || job.status === "cancelled") {
-      throw new Error(job.error ?? "编译任务失败");
+      // 注意 `??` 对空串不生效：后端任务可能带着空 error 字段失败
+      throw new Error(job.error?.trim() || "编译任务失败（原因未返回，请查看后端任务列表）");
     }
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
