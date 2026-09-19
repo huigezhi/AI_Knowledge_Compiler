@@ -63,3 +63,6 @@ logs/
 *.log
 npm-debug.log*
 yarn-error.log*
+
+# 探针产出的临时截图
+probe-*.png
