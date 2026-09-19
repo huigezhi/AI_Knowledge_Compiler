@@ -35,7 +35,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Se
     monkeypatch.setenv("AKC_DATABASE_URL", f"sqlite+pysqlite:///{tmp_path.as_posix()}/akc.db")
     monkeypatch.setenv("AKC_LOG_JSON", "false")
     monkeypatch.setenv("AKC_LOG_LEVEL", "WARNING")
-    monkeypatch.setenv("AKC_AUTH_TOKEN", "")
+    # 固定令牌，便于验证「写请求必须带 X-AKC-Token」的拦截行为
+    monkeypatch.setenv("AKC_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("AKC_JOB_BACKOFF_SECONDS", "0,0,0")  # 测试中重试立即到期
     monkeypatch.delenv("AKC_VAULT_PATH", raising=False)
     get_settings.cache_clear()
@@ -62,7 +63,17 @@ def session() -> Iterator[Session]:
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(settings: Settings) -> Iterator[TestClient]:
+    """已携带本地令牌的客户端（模拟扩展的写请求）。"""
+    with TestClient(create_app()) as test_client:
+        if settings.auth_token:
+            test_client.headers["X-AKC-Token"] = settings.auth_token
+        yield test_client
+
+
+@pytest.fixture
+def anonymous_client() -> Iterator[TestClient]:
+    """不带令牌的客户端（模拟浏览器里其它网页伪造的本地请求）。"""
     with TestClient(create_app()) as test_client:
         yield test_client
 

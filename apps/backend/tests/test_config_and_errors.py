@@ -46,7 +46,8 @@ def test_settings_parses_csv_backoff() -> None:
 def test_auth_token_persisted(tmp_path) -> None:  # noqa: ANN001
     from akc.config import Settings
 
-    settings = Settings(data_dir=tmp_path, _env_file=None)  # type: ignore[call-arg]
+    # 显式清空令牌，验证「未配置时生成并持久化」这条路径（测试环境注入了固定令牌）
+    settings = Settings(data_dir=tmp_path, auth_token=None, _env_file=None)  # type: ignore[call-arg]
     token = settings.ensure_auth_token()
     assert token
     assert (tmp_path / "auth_token").exists()

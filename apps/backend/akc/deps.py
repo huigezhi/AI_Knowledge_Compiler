@@ -40,10 +40,13 @@ def require_token(
     settings: SettingsDep,
     x_akc_token: Annotated[str | None, Header(alias="X-AKC-Token")] = None,
 ) -> None:
-    """本地共享令牌校验。
+    """本地共享令牌校验（作为 FastAPI 依赖挂在整个应用上）。
 
     只监听 127.0.0.1 并不够：浏览器里的任意网页都能向 localhost 发起请求，
     因此所有写操作必须携带扩展才知道的随机 token（等价 CSRF 防护）。
+
+    注意：**必须**作为依赖而不是 HTTP 中间件——中间件里抛出的异常无法被
+    FastAPI 的全局异常处理器捕获，会退化成 500 并泄露堆栈。
     """
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return

@@ -75,6 +75,20 @@ def test_import_rejects_invalid_payload(client: TestClient) -> None:
     assert body["request_id"]
 
 
+def test_write_requires_token(anonymous_client: TestClient) -> None:
+    """只监听回环地址不够：浏览器里任意网页都能请求 localhost，写操作必须带令牌。"""
+    response = anonymous_client.post(
+        "/api/v1/conversations/import", json={"conversation": _conversation_payload()}
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_read_does_not_require_token(anonymous_client: TestClient) -> None:
+    """只读端点保持免令牌，扩展首屏探测不受影响。"""
+    assert anonymous_client.get("/api/v1/health").status_code == 200
+
+
 def test_not_found_contract(client: TestClient) -> None:
     response = client.get("/api/v1/conversations/missing")
     assert response.status_code == 404

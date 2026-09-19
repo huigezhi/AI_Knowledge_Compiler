@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from akc import __version__
@@ -44,6 +44,14 @@ def create_app() -> FastAPI:
         if executed:
             get_logger().info("migrations_applied", extra={"extra_fields": {"versions": executed}})
 
+        # 生成本地共享令牌：只监听回环地址不足以阻止其它网页伪造本地请求。
+        # 只记录令牌文件位置，绝不把令牌值写进日志。
+        settings.ensure_auth_token()
+        get_logger().info(
+            "auth_token_ready",
+            extra={"extra_fields": {"path": str(settings.data_dir / "auth_token")}},
+        )
+
         register_all_handlers()
         worker = JobWorker(settings)
         worker.start()
@@ -66,7 +74,8 @@ def create_app() -> FastAPI:
         version=__version__,
         description="本地知识编译服务：会话采集、Claude 编译、Obsidian 写入",
         lifespan=lifespan,
-        dependencies=[],  # 令牌校验在中间件里统一处理（需读取 method）
+        # 令牌校验挂在应用级依赖上，异常才能被全局处理器转成规范化的 401
+        dependencies=[Depends(require_token)],
     )
 
     # --- CORS：显式来源，生产禁用通配符 -----------------------------------
@@ -81,8 +90,9 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # 令牌校验不在这里做：中间件抛出的异常无法被全局异常处理器捕获，
+        # 会退化成 500。改为应用级依赖（见 FastAPI(dependencies=[...])）。
         request_id = set_request_id(request.headers.get("X-Request-ID"))
-        require_token(request, settings, request.headers.get("X-AKC-Token"))
         started = time.perf_counter()
         response = await call_next(request)
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
