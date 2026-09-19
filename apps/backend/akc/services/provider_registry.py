@@ -34,7 +34,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(
         id="deepseek",
         display_name="DeepSeek",
-        adapter_version="0.1.0",
+        adapter_version="0.2.0",
         origins=("chat.deepseek.com",),
     ),
     ProviderSpec(
@@ -46,7 +46,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(
         id="zhipu",
         display_name="智谱清言",
-        adapter_version="0.1.0",
+        adapter_version="0.2.0",
         origins=("chatglm.cn", "bigmodel.cn"),
     ),
 )

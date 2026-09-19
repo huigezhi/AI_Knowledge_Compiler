@@ -6,60 +6,108 @@
 </head>
 <body>
   <main id="chat-container">
-    <div class="chat-title">CTE 递归查询讨论</div>
-    <nav class="akc-history">
-      <a href="/chat/aaaaaaaaaa"><span class="akc-history-title">SQL 性能优化</span></a>
-      <a href="/chat/bbbbbbbbbb"><span class="akc-history-title">CTE 递归查询讨论</span></a>
-      <a href="/chat/cccccccccc"><span class="akc-history-title">索引失效排查</span></a>
-    </nav>
-    <div class="chat-item">
-      <div data-role="user" data-message-id="zhipu-u1">
-        <div class="akc-content">
+    <div class="chat-top-section"><div class="middle"><p class="conversation-name el-tooltip__trigger">CTE 递归查询讨论</p><span class="measure-span">CTE 递归查询讨论</span></div></div>
+    <div class="history-list"><div class="list">
+      <div class="history-item el-tooltip__trigger"><div class="item-checkbox"></div><div class="title">SQL 性能优化</div><div class="option"></div></div>
+      <div class="history-item el-tooltip__trigger"><div class="item-checkbox"></div><div class="title">CTE 递归查询讨论</div><div class="option"></div></div>
+      <div class="history-item el-tooltip__trigger"><div class="item-checkbox"></div><div class="title">索引失效排查</div><div class="option"></div></div>
+    </div></div>
+    <div class="conversation question pr flex flex-x-start flex-y-start">
+      <img class="user-img" />
+      <div class="pr width_full">
+        <div class="user-name">tester</div>
+        <div class="pr question-text-style">
+          <div class="fs14 flex1 ft_grey3 question-txt dots wrap pr">
+<div class="akc-body">
         CTE 和子查询有什么区别？
         </div>
-        <time datetime="2026-09-18T20:31:00+08:00"></time>
+          </div>
+          <div class="copy-btn"><div class="copy-btn-icon"></div><div class="copy-btn-text">复制入框</div></div>
+        </div>
       </div>
     </div>
-    <div class="chat-item">
-      <div data-role="assistant" data-message-id="zhipu-a1">
-        <div class="akc-content">
+    <div class="answer">
+      <div class="panel">
+        <div class="flex flex-x-between flex-y-start">
+          <div class="answer-content flex1">
+            <div class="assistant-name"><span>ChatGLM</span></div>
+            <div class="code-box flex1">
+              <div class="advance-thinking collapse"><span>思考中（过程噪声，应被剔除）</span></div>
+              <div class="answer-content-wrap">
+<div class="akc-body">
         CTE 可读性更好；递归场景必须用 CTE。
         </div>
-        <time datetime="2026-09-18T20:31:00+08:00"></time>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="chat-item">
-      <div data-role="user" data-message-id="zhipu-u2">
-        <div class="akc-content">
+    <time datetime="2026-09-18T20:31:00+08:00"></time>
+    <div class="conversation question pr flex flex-x-start flex-y-start">
+      <img class="user-img" />
+      <div class="pr width_full">
+        <div class="user-name">tester</div>
+        <div class="pr question-text-style">
+          <div class="fs14 flex1 ft_grey3 question-txt dots wrap pr">
+<div class="akc-body">
         性能上呢？
         </div>
-        <time datetime="2026-09-18T20:31:00+08:00"></time>
+          </div>
+          <div class="copy-btn"><div class="copy-btn-icon"></div><div class="copy-btn-text">复制入框</div></div>
+        </div>
       </div>
     </div>
-    <div class="chat-item">
-      <div data-role="assistant" data-message-id="zhipu-a2">
-        <div class="akc-content">
+    <div class="answer">
+      <div class="panel">
+        <div class="flex flex-x-between flex-y-start">
+          <div class="answer-content flex1">
+            <div class="assistant-name"><span>ChatGLM</span></div>
+            <div class="code-box flex1">
+              <div class="advance-thinking collapse"><span>思考中（过程噪声，应被剔除）</span></div>
+              <div class="answer-content-wrap">
+<div class="akc-body">
         大多数情况下优化器会内联展开，差异不大。
         </div>
-        <time datetime="2026-09-18T20:31:00+08:00"></time>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="chat-item">
-      <div data-role="user" data-message-id="zhipu-u3">
-        <div class="akc-content">
+    <time datetime="2026-09-18T20:31:00+08:00"></time>
+    <div class="conversation question pr flex flex-x-start flex-y-start">
+      <img class="user-img" />
+      <div class="pr width_full">
+        <div class="user-name">tester</div>
+        <div class="pr question-text-style">
+          <div class="fs14 flex1 ft_grey3 question-txt dots wrap pr">
+<div class="akc-body">
         什么时候会变慢？
         </div>
-        <time datetime="2026-09-18T20:31:00+08:00"></time>
+          </div>
+          <div class="copy-btn"><div class="copy-btn-icon"></div><div class="copy-btn-text">复制入框</div></div>
+        </div>
       </div>
     </div>
-    <div class="chat-item">
-      <div data-role="assistant" data-message-id="zhipu-a3">
-        <div class="akc-content">
+    <div class="answer">
+      <div class="panel">
+        <div class="flex flex-x-between flex-y-start">
+          <div class="answer-content flex1">
+            <div class="assistant-name"><span>ChatGLM</span></div>
+            <div class="code-box flex1">
+              <div class="advance-thinking collapse"><span>思考中（过程噪声，应被剔除）</span></div>
+              <div class="answer-content-wrap">
+<div class="akc-body">
         递归层级深或需要物化时，需要显式控制。
         </div>
-        <time datetime="2026-09-18T20:31:00+08:00"></time>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
+    <time datetime="2026-09-18T20:31:00+08:00"></time>
   </main>
 </body>
 </html>

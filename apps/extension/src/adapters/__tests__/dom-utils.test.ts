@@ -191,4 +191,32 @@ describe("extractBlocks", () => {
     mount('<div id="e"></div>');
     expect(extractBlocks(document.getElementById("e")!)).toEqual([{ type: "text", text: "" }]);
   });
+
+  it("穿透包装层仍能取到代码块（真实页面常有多层包装）", () => {
+    // 智谱真实结构：.answer-content-wrap > .markdown-body > pre
+    mount(
+      '<div id="wrap"><div class="markdown-body"><p>看这里</p>' +
+        '<pre><code class="language-python">print(1)</code></pre></div></div>',
+    );
+    const blocks = extractBlocks(document.getElementById("wrap")!);
+    const code = blocks.find((b) => b.type === "code");
+    expect(code).toMatchObject({ type: "code", language: "python" });
+  });
+
+  it("穿透包装层仍能取到表格", () => {
+    mount(
+      '<div id="wrap"><div class="md"><table><tr><th>A</th></tr><tr><td>1</td></tr></table></div></div>',
+    );
+    const text = extractBlocks(document.getElementById("wrap")!)
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("\n");
+    expect(text).toContain("| A |");
+  });
+
+  it("同行内标签的段落不会被拆成多块", () => {
+    mount('<div id="p"><p>你好 <b>世界</b>！</p></div>');
+    const blocks = extractBlocks(document.getElementById("p")!);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toEqual({ type: "text", text: "你好 世界！" });
+  });
 });

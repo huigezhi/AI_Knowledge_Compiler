@@ -102,6 +102,8 @@ export function createDomAdapter(
         role: inferRole(node, selectors.roleAttr, {
           assistant: selectors.assistantIfMatches,
           user: selectors.userIfMatches,
+          assistantContains: selectors.assistantIfContains,
+          userContains: selectors.userIfContains,
         }),
         content: extractContent(contentNode, selectors.excludeFromContent),
         sequence: index,
@@ -177,10 +179,17 @@ export function createDomAdapter(
       const origin = new URL(pageUrl() || "https://example.com").origin;
       const summaries = items.map((item) => {
         const href = item.getAttribute("href") ?? "";
-        const titleNode = queryDeepest(item, selectors.historyTitle) ?? item;
+        // 历史项标题可选：有选择器用选择器取最深节点，否则退化为条目自身文本
+        const titleNode = selectors.historyTitle
+          ? (queryDeepest(item, selectors.historyTitle) ?? item)
+          : item;
+        const title = readTitle(titleNode) || "(untitled)";
+        // 有的平台（智谱清言）历史行里没有任何 ID，只有标题；
+        // 此时用 title:<标题> 作为占位 ID，批量同步按标题匹配（见 sidepanel）。
+        const externalId = def.conversationIdFromHref(href) ?? (href || `title:${title}`);
         return {
-          provider_conversation_id: def.conversationIdFromHref(href) ?? href,
-          title: readTitle(titleNode) || "(untitled)",
+          provider_conversation_id: externalId,
+          title,
           url: href ? new URL(href, origin).toString() : undefined,
         };
       });

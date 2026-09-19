@@ -195,14 +195,29 @@ async function batchSync(): Promise<void> {
   if (failed > 0) showError(`${failed} 条同步失败，原始数据未受影响，可重试。`, batchSync);
 }
 
+/**
+ * 批量同步取会话。
+ *
+ * 有的平台（智谱清言）历史列表里没有任何会话 ID，只能用 `title:<标题>` 占位 ID，
+ * 因此除了 ID 相等，还接受「标题相等」的匹配。
+ */
 async function fetchConversationById(id: string): Promise<Conversation> {
   const response = await toBackground({ type: "AKC/FETCH_CURRENT" });
   if (!response.ok) throw new Error(response.message);
   if (!("conversation" in response)) throw new Error("content script 未返回会话数据");
-  if (response.conversation.provider_conversation_id !== id) {
-    throw new Error(`请先打开会话 ${id} 再同步（当前页面是 ${response.conversation.provider_conversation_id}）`);
+  const conversation = response.conversation;
+  const expectedTitle = id.startsWith("title:") ? id.slice("title:".length) : null;
+  const matched = expectedTitle
+    ? conversation.title === expectedTitle
+    : conversation.provider_conversation_id === id;
+  if (!matched) {
+    throw new Error(
+      expectedTitle
+        ? `请先打开标题为「${expectedTitle}」的会话再同步（当前是「${conversation.title}」）`
+        : `请先打开会话 ${id} 再同步（当前页面是 ${conversation.provider_conversation_id}）`,
+    );
   }
-  return response.conversation;
+  return conversation;
 }
 
 // ------------------------------------------------------------------ 编译

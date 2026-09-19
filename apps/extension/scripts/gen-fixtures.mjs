@@ -29,11 +29,54 @@ const PROVIDERS = {
     message: (role, id) => `data-message-author-role="${role}" data-message-id="${id}"`,
     withChatTitle: false,
   },
+  /**
+   * DeepSeek：选择器来自线上实测（docs/adapters.md §7）。
+   * 消息容器 `div.ds-message`；角色靠**后代**标记区分；
+   * 用户消息正文在 `.ds-collapsible-text`，AI 正文在 `.ds-assistant-message-main-content`。
+   */
   deepseek: {
-    href: (id) => `/chat/${id}`,
-    turn: () => `data-testid="chat-turn"`,
-    message: (role, id) => `data-message-id="${id}" data-role="${role}"`,
-    withChatTitle: true,
+    href: (id) => `/a/chat/s/${id}`,
+    turn: () => null,
+    message: () => "",
+    withChatTitle: false,
+    historyNav: () =>
+      `    <nav class="akc-history">\n` +
+      HISTORY.map(
+        ([id, title]) =>
+          `      <a class="_546d736" href="/a/chat/s/${id}">` +
+          `<div class="ds-focus-ring"></div>` +
+          `<div class="c08e6e93">${title}</div>` +
+          `<div class="_254829d"><div class="ds-button ds-button--icon" role="button"></div></div>` +
+          `</a>`,
+      ).join("\n") +
+      `\n    </nav>`,
+    buildMessage: (role, id, bodyHtml, timestamp) => {
+      const body = `<div class="akc-body">\n${bodyHtml}\n        </div>`;
+      if (role === "user") {
+        return [
+          `    <div class="_9663006 _2c189bc">`,
+          `      <div class="d29f3d7d ds-message _63c77b1" data-message-id="${id}">`,
+          `        <div class="fbb737a4">`,
+          `          <div class="ds-collapsible-text">`,
+          body,
+          `          </div>`,
+          `        </div>`,
+          `      </div>`,
+          `    </div>`,
+          `    <time datetime="${timestamp}"></time>`,
+        ].join("\n");
+      }
+      return [
+        `    <div class="_4f9bf79 d7dc56a8 _43c05b5">`,
+        `      <div class="ds-message _63c77b1" data-message-id="${id}">`,
+        `        <div class="ds-markdown ds-assistant-message-main-content">`,
+        body,
+        `        </div>`,
+        `      </div>`,
+        `    </div>`,
+        `    <time datetime="${timestamp}"></time>`,
+      ].join("\n");
+    },
   },
   /**
    * 豆包：选择器来自线上实测（见 docs/adapters.md §7），fixture 必须还原真实结构：
@@ -100,11 +143,72 @@ const PROVIDERS = {
       ].join("\n");
     },
   },
+  /**
+   * 智谱清言：选择器来自线上实测（docs/adapters.md §7）。
+   * 一轮 = `div.item.conversation-item`，内含用户 `.conversation.question` 与 AI `div.answer`；
+   * 历史行没有任何会话 ID，只有 `.title`。
+   */
   zhipu: {
-    href: (id) => `/chat/${id}`,
-    turn: () => `class="chat-item"`,
-    message: (role, id) => `data-role="${role}" data-message-id="${id}"`,
-    withChatTitle: true,
+    href: () => null,
+    turn: () => null,
+    message: () => "",
+    withChatTitle: false,
+    chatTitleHtml: (title) =>
+      `    <div class="chat-top-section"><div class="middle">` +
+      `<p class="conversation-name el-tooltip__trigger">${title}</p>` +
+      `<span class="measure-span">${title}</span>` +
+      `</div></div>`,
+    historyNav: () =>
+      `    <div class="history-list"><div class="list">\n` +
+      HISTORY.map(
+        ([, title]) =>
+          `      <div class="history-item el-tooltip__trigger">` +
+          `<div class="item-checkbox"></div>` +
+          `<div class="title">${title}</div>` +
+          `<div class="option"></div>` +
+          `</div>`,
+      ).join("\n") +
+      `\n    </div></div>`,
+    buildMessage: (role, id, bodyHtml, timestamp) => {
+      const userBlock = (body) =>
+        [
+          `    <div class="conversation question pr flex flex-x-start flex-y-start">`,
+          `      <img class="user-img" />`,
+          `      <div class="pr width_full">`,
+          `        <div class="user-name">tester</div>`,
+          `        <div class="pr question-text-style">`,
+          `          <div class="fs14 flex1 ft_grey3 question-txt dots wrap pr">`,
+          body,
+          `          </div>`,
+          `          <div class="copy-btn"><div class="copy-btn-icon"></div><div class="copy-btn-text">复制入框</div></div>`,
+          `        </div>`,
+          `      </div>`,
+          `    </div>`,
+        ].join("\n");
+      const answerBlock = (body) =>
+        [
+          `    <div class="answer">`,
+          `      <div class="panel">`,
+          `        <div class="flex flex-x-between flex-y-start">`,
+          `          <div class="answer-content flex1">`,
+          `            <div class="assistant-name"><span>ChatGLM</span></div>`,
+          `            <div class="code-box flex1">`,
+          `              <div class="advance-thinking collapse"><span>思考中（过程噪声，应被剔除）</span></div>`,
+          `              <div class="answer-content-wrap">`,
+          body,
+          `              </div>`,
+          `            </div>`,
+          `          </div>`,
+          `        </div>`,
+          `      </div>`,
+          `    </div>`,
+          `    <time datetime="${timestamp}"></time>`,
+        ].join("\n");
+      const body = `<div class="akc-body">\n${bodyHtml}\n        </div>`;
+      // 真实 DOM 会把一问一答包在同一个 .conversation-item 里，
+      // 但适配器不依赖该容器，这里直接输出两条消息，避免 fixture 结构误导。
+      return role === "user" ? userBlock(body) : answerBlock(body);
+    },
   },
 };
 

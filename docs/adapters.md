@@ -132,7 +132,37 @@ node scripts/probe-real-page.mjs --clone-profile --url https://www.doubao.com/ch
 | 历史项标题 | `[data-conversation-id] span[class*="whitespace-nowrap"]:not([aria-hidden="true"])` | 1 |
 | 会话根 | `#root` / `[data-container-name="main"]` | 1 |
 
-**三个必须记住的坑（都是线上撞出来的）**：
+### DeepSeek `chat.deepseek.com`（2026-09-19 线上实测，adapter 0.2.0）
+
+| 目标 | 实测选择器 |
+| --- | --- |
+| 会话 ID | **在路径里**：`/a/chat/s/<uuid>`（原来按 `/chat/<id>` 匹配会漏 → detectPage 失效） |
+| 消息容器 | `div.ds-message` |
+| 角色判定 | AI：**内含** `.ds-assistant-message-main-content`；用户：**内含** `.ds-collapsible-text` |
+| 正文 | AI `.ds-assistant-message-main-content`；用户 `.ds-collapsible-text` |
+| 历史列表 | `a[href*="/a/chat/s/"]`（标题即链接自身文本） |
+| 标题 | 取自 `document.title`（"你好 - DeepSeek"，displayName 后缀自动剥离） |
+
+⚠️ **虚拟列表**：消息区是 `div.ds-virtual-list-visible-items`，只有视口内的消息在 DOM 里，
+超长对话需先滚动加载。class 带构建 hash（`_63c77b1`），禁止用作选择器。
+
+### 智谱清言 `chatglm.cn`（2026-09-19 线上实测，adapter 0.2.0）
+
+| 目标 | 实测选择器 |
+| --- | --- |
+| 会话 ID | **在查询参数里**：`?cid=<id>`（不在路径上） |
+| 消息容器 | 逗号选择器 `.conversation.question, div.answer`（一问一答各一个元素） |
+| 角色判定 | AI 自身匹配 `div.answer`；用户自身匹配 `.conversation.question` |
+| 正文 | AI `.answer-content-wrap`；用户 `.question-txt`（**不能取 `.question-text-style`**，它含"复制入框"按钮文字） |
+| 思考块 | `.advance-thinking`（与答案同级）→ 用 excludeFromContent 剔除 |
+| 标题 | `div.chat-top-section p.conversation-name`（旁边有 measure-span 同文副本，取自身文本） |
+| 历史列表 | `.history-list .history-item`，标题 `.title` |
+
+⚠️ **历史行没有任何会话 ID**（只有 cid 在 URL 上）。因此 `listConversations` 会用
+`title:<标题>` 作为占位 ID，批量同步按**标题**匹配（见 `sidepanel/main.ts#fetchConversationById`）。
+Vue 的 `data-v-*` 是构建期哈希，禁止用作选择器。
+
+### 三个平台共同的坑（都是线上撞出来的）
 
 1. **不存在 `data-role`** —— 最初推断的 `[data-role]` / `.message-item` 在真实页面上命中 0，
    这是用户报「未匹配到任何消息节点」的直接原因。角色只能靠 `data-reply-message` + `justify-end`。

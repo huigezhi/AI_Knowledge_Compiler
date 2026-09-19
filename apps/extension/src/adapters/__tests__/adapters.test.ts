@@ -21,9 +21,11 @@ const FIXTURE_DIR = resolve(process.cwd(), "tests", "fixtures");
 const URLS: Record<ProviderId, string> = {
   chatgpt: "https://chatgpt.com/c/aaaaaaaaaa",
   claude: "https://claude.ai/chat/aaaaaaaaaa",
-  deepseek: "https://chat.deepseek.com/chat/aaaaaaaaaa",
+  // DeepSeek 的会话 ID 在路径 /a/chat/s/<uuid>，不是 /chat/<id>
+  deepseek: "https://chat.deepseek.com/a/chat/s/aaaaaaaaaa",
   doubao: "https://www.doubao.com/chat/aaaaaaaaaa",
-  zhipu: "https://chatglm.cn/chat/aaaaaaaaaa",
+  // 智谱清言的会话 ID 在查询参数 cid 上
+  zhipu: "https://chatglm.cn/main/alltoolsdetail?lang=zh&cid=aaaaaaaaaa",
 };
 
 function loadFixture(provider: ProviderId, kind: string): void {
