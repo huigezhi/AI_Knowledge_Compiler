@@ -1,0 +1,24 @@
+{
+  "name": "@akc/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Knowledge Compiler — Chrome MV3 extension (side panel, provider adapters, capture & sync)",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "fixtures": "node scripts/gen-fixtures.mjs"
+  },
+  "dependencies": {
+    "@akc/schema": "file:../../packages/schema"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "jsdom": "^24.1.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  }
+}
