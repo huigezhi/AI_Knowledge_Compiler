@@ -90,7 +90,49 @@ fixtures 已提交到仓库，**禁止只依赖线上页面测试**。
 > 再看 `currentSelectors` 中哪个为 0，最后用 `repeatedSiblingSignatures` 与
 > `messageSamples` 确定新的 `SELECTORS`。
 
-## 7. 页面结构变化时的标准修复流程
+### 自动化探针（推荐，省去手动粘贴）
+
+`scripts/probe-real-page.mjs` 用 Playwright 直接驱动浏览器执行同一份探针：
+
+```bash
+# A. 连接带调试端口启动的 Chrome（推荐：不复制任何登录数据，窗口用户可见）
+#    用户双击 scripts/windows/start-chrome-debug.bat 一次即可
+node scripts/probe-real-page.mjs --cdp http://127.0.0.1:9222 \
+  --url https://www.doubao.com/chat/ --send "你好" --out report.json --screenshot
+
+# B. 用 Chrome 登录数据的副本启动独立实例（要求 Chrome 已完全退出）
+node scripts/probe-real-page.mjs --clone-profile --url https://www.doubao.com/chat/
+```
+
+依赖 `playwright-core`（路径可用 `AKC_PW` 覆盖；浏览器可用 `AKC_CHROME` 覆盖）。
+
+**实测踩过的坑（务必记住）**：
+
+| 现象 | 原因与解法 |
+| --- | --- |
+| 输入的文字没进输入框 | 富文本编辑器（tiptap / ProseMirror）只接受真实按键序列，用 `pressSequentially`，`fill()` 无效 |
+| 「未找到可用输入框」 | SPA 首帧还没有输入框，必须先 `waitForSelector` 再操作，不能立刻 `count()` |
+| Cookies 复制报 EBUSY | Chrome 运行中对 Cookies SQLite 加排他锁（连共享读都不允许），必须完全退出 Chrome |
+| 发送后页面无变化 | 游客态通常不允许发消息（豆包已实测），必须有登录态才能逼出消息容器结构 |
+
+## 7. 实测结构记录（逐步补充，勿凭猜测改选择器）
+
+### 豆包 `www.doubao.com`（2026-09-19 实测，游客态）
+
+探测方式：`node apps/extension/scripts/probe-real-page.mjs --url https://www.doubao.com/chat/`
+
+| 结论 | 说明 |
+| --- | --- |
+| **不存在 `data-role`** | 原 `SELECTORS.message = "[data-role]"` 完全失效，这是用户实测报错的直接原因 |
+| **class 带构建 hash** | `content-cjRQVY` / `nav-link-IkIer0` / `input-content-container-bMefgL`，随版本变化，**禁止作为选择器** |
+| 可用的稳定标记 | `data-history-container="true"`（会话历史容器）、`data-empty-conversation="true"`（空会话）、`data-chatapp-style="default"` |
+| 输入框 | tiptap / ProseMirror（`.ProseMirror`），**必须逐字按键输入**（`fill()` 不生效） |
+| 游客态限制 | 未登录时**不允许发送消息**（回车无效、输入被清空），因此无法用游客态逼出消息容器结构 |
+
+**仍待确认**：消息容器（单条 user / assistant 消息）的选择器 —— 需要登录态且有消息的页面。
+在拿到之前，豆包适配器保持"宁可失败也不猜"，不做宽泛匹配。
+
+## 8. 页面结构变化时的标准修复流程
 
 0. 先跑上面 §6 的探针，拿到真实结构（不要盲改选择器）；
 1. 更新 `src/adapters/<provider>.ts` 的 `SELECTORS`
