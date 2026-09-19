@@ -7,11 +7,17 @@
 
 用法：
     python push_via_api.py <token> <base_sha> <commit_sha> [<commit_sha> ...]
+    python push_via_api.py <token> auto          # 自动解析远端 HEAD 与待推提交
 
     # base_sha 为远端当前 HEAD，例如：
     git ls-remote https://github.com/<owner>/<repo>.git main
 
 依赖：httpx（后端虚拟环境里已有）。脚本内不硬编码任何凭据，token 从参数传入。
+
+备注：本项目约定**一律用本工具推送**（git 协议在本机网络下时通时断，API 直连更稳）。
+API 生成的提交与本地内容相同但 sha 不同（镜像历史），因此 base_sha 常常不在本地
+对象库中 —— 用 "auto" 模式可免手填：远端 HEAD 从 API 查询，待推提交按
+.git/akc-push-state.json 记录的本地上次 HEAD 展开。
 """
 
 from __future__ import annotations
@@ -107,31 +113,41 @@ def write_state(local_head: str, remote_head: str) -> None:
         json.dump({"local_head": local_head, "remote_head": remote_head}, handle, indent=2)
 
 
+def resolve_base_sha(client: httpx.Client, headers: dict[str, str]) -> str:
+    """auto 模式：远端 HEAD 从 API 查询 —— 本机 git 协议不通时 ls-remote 也用不了。"""
+    ref = client.get(f"{BASE}/git/ref/heads/main", headers=headers)
+    if ref.status_code != 200:
+        raise SystemExit(f"查询远端 HEAD 失败: {ref.status_code} {ref.text[:200]}")
+    return ref.json()["object"]["sha"]
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(__doc__)
         return 2
-    token, base_sha = argv[1], argv[2]
-    commits = argv[3:]
-    if not commits or commits[0] == "--local-base":
-        local_base = commits[1] if commits else None
-        if local_base:
-            commits = git("rev-list", "--reverse", f"{local_base}..HEAD").split()
-        else:
-            commits = resolve_commits(base_sha)
-        print(f"自动展开待推送提交 {len(commits)} 个")
+    token, base_arg = argv[1], argv[2]
+    extra = argv[3:]
+    headers = {**HEADERS, "Authorization": f"Bearer {token}"}
+
+    base_sha = "auto" if base_arg == "auto" else base_arg
+    commits = [c for c in extra if c != "--local-base"]
+    local_base = extra[1] if "--local-base" in extra else None
 
     if not commits:
+        if local_base:
+            commits = git("rev-list", "--reverse", f"{local_base}..HEAD").split()
+        elif base_sha != "auto":
+            commits = resolve_commits(base_sha)
+
+    if not commits and base_sha != "auto":
         # 曾经踩过的坑：提交列表为空时仍然写状态文件，于是状态跑到真实远端之前，
         # 之后每次都算出「0 个待推送」却打印成功 —— 提交被静默吞掉。
         # 这里直接停下并保持状态不变，让问题可见。
         print(
             "没有待推送的提交。若你本地确实有未推送的提交，通常是状态文件超前了，\n"
-            "请显式指定：push_via_api.py <token> <base_sha> --local-base <本地上次已推送的 HEAD>"
+            "请显式指定：push_via_api.py <token> auto --local-base <本地上次已推送的 HEAD>"
         )
         return 0
-
-    headers = {**HEADERS, "Authorization": f"Bearer {token}"}
 
     with httpx.Client(trust_env=False, timeout=60.0) as client:  # 直连，绕过环境代理
         probe = client.get(BASE, headers=headers)
@@ -139,6 +155,15 @@ def main(argv: list[str]) -> int:
             print(f"API 不可达: {probe.status_code} {probe.text[:200]}")
             return 1
         print(f"repo ok: {probe.json()['full_name']}")
+
+        if base_sha == "auto":
+            base_sha = resolve_base_sha(client, headers)
+        if not commits:
+            commits = resolve_commits(base_sha)
+            print(f"自动展开待推送提交 {len(commits)} 个")
+            if not commits:
+                print("没有待推送的提交：本地与远端一致")
+                return 0
 
         current = base_sha
         tree_base = client.get(f"{BASE}/git/commits/{base_sha}", headers=headers).json()["tree"]["sha"]
