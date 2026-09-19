@@ -38,10 +38,13 @@ curl http://127.0.0.1:38127/api/v1/health
 
 ## 第 2 步：配置 Vault 与 Claude（可选但推荐）
 
-复制 `.env.example` 为 `apps/backend/.env`，按需填写：
+连接 Obsidian 库**不用手改配置**：双击 `scripts/windows/set-vault.bat`，
+它会列出你电脑上已安装的 Obsidian 库让你选择（也支持拖拽文件夹或粘贴路径），
+自动写入并把后端重启好。
+
+其余配置（Claude 等）复制 `.env.example` 为 `apps/backend/.env`，按需填写：
 
 ```env
-AKC_VAULT_PATH=E:/Obsidian/AKC-Vault          # 必填才能写入 Obsidian
 AKC_CLAUDE_ENABLED=true                        # 想编译就设为 true
 AKC_CLAUDE_MODEL=<你的模型 ID>                  # 例如 claude-sonnet-4-5
 AKC_CLAUDE_API_KEY=sk-ant-...                  # 绝对不要提交到 Git

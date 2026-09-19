@@ -6,6 +6,7 @@
 .DESCRIPTION
     所有操作都围绕同一个入口，幂等可重复执行：
       install    创建虚拟环境、装依赖、构建扩展、生成 .env
+      set-vault  连接你的 Obsidian 库（自动识别已安装的库，写入 .env 并重启）
       start      后台启动后端（已运行则跳过）
       stop       停止后端
       restart    重启
@@ -21,13 +22,15 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("install", "start", "stop", "restart", "status", "autostart", "uninstall", "open")]
+    [ValidateSet("install", "start", "stop", "restart", "status", "autostart", "set-vault", "uninstall", "open")]
     [string]$Command = "status",
 
     [switch]$Off,      # autostart -Off 取消自启；install 时跳过构建扩展用 -SkipExtension
     [switch]$Purge,    # uninstall -Purge 连同数据与配置一起删除
     [switch]$SkipExtension,
-    [switch]$AsTask    # autostart -AsTask 额外注册计划任务（需要管理员权限）
+    [switch]$AsTask,   # autostart -AsTask 额外注册计划任务（需要管理员权限）
+    [string]$VaultPath, # set-vault -VaultPath "D:\MyVault" 直接指定库路径（不给则交互选择）
+    [switch]$Clear      # set-vault -Clear 清除库路径配置
 )
 
 $ErrorActionPreference = "Stop"
@@ -175,6 +178,7 @@ function Invoke-Start {
         }
     }
     if (-not $launched) {
+        # 最后兜底：CIM 创建进程（环境块取自系统，不受当前会话的重复键影响）
         Write-Warn "改用 CIM 启动"
         $cmdLine = 'cmd.exe /c "' + $PyExe + '" -m akc > "' + $outLog + '" 2> "' + $errLog + '"'
         $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
@@ -229,6 +233,106 @@ function Invoke-Status {
 
 function Get-StartupLink {
     return Join-Path ([Environment]::GetFolderPath("Startup")) "AKC Backend.lnk"
+}
+
+<# 读取 Obsidian 自己记录的库列表（%APPDATA%\obsidian\obsidian.json）。 #>
+function Get-ObsidianVaults {
+    $cfg = Join-Path $env:APPDATA "obsidian\obsidian.json"
+    if (-not (Test-Path $cfg)) { return @() }
+    try {
+        $json = Get-Content $cfg -Raw -Encoding UTF8 | ConvertFrom-Json
+        $list = @()
+        foreach ($prop in $json.vaults.PSObject.Properties) {
+            $list += [pscustomobject]@{ Path = [string]$prop.Value.path; Open = [bool]$prop.Value.open }
+        }
+        return $list
+    } catch {
+        return @()
+    }
+}
+
+<# 写入/更新 .env 中的某个键（保持其余内容不变，UTF-8 无 BOM）。 #>
+function Set-EnvValue([string]$key, [string]$value) {
+    $envFile = Join-Path $Backend ".env"
+    if (-not (Test-Path $envFile)) { Copy-Item (Join-Path $Root ".env.example") $envFile }
+    $lines = @(Get-Content $envFile -Encoding UTF8)
+    $replaced = $false
+    $out = foreach ($line in $lines) {
+        if ($line -match "^\s*$([regex]::Escape($key))\s*=") { $replaced = $true; "$key=$value" } else { $line }
+    }
+    if (-not $replaced) { $out += "$key=$value" }
+    # 必须写 UTF-8 无 BOM：带 BOM 会让第一个键名多出 \ufeff，破坏配置解析
+    [System.IO.File]::WriteAllLines($envFile, $out, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-SetVault {
+    # 清除配置
+    if ($Clear) {
+        Set-EnvValue "AKC_VAULT_PATH" ""
+        Write-Ok "已清除 Obsidian 库路径配置"
+        try {
+            Invoke-Stop
+            Invoke-Start
+        } catch {
+            Write-Warn "后端重启未成功：$($_.Exception.Message.Trim())；稍后双击 start.bat 生效"
+        }
+        Write-Host "     现在写入 Obsidian 会返回未配置错误"
+        return
+    }
+
+    $vault = $VaultPath
+
+    if (-not $vault) {
+        $detected = @(Get-ObsidianVaults)
+        if ($detected.Count -gt 0) {
+            Write-Step "检测到以下 Obsidian 库"
+            for ($i = 0; $i -lt $detected.Count; $i++) {
+                $suffix = if ($detected[$i].Open) { "   （Obsidian 当前打开）" } else { "" }
+                Write-Host ("     {0}) {1}{2}" -f ($i + 1), $detected[$i].Path, $suffix)
+            }
+            Write-Host ""
+        }
+        Write-Host "     选择序号，或直接粘贴 / 把文件夹拖进本窗口，然后回车（直接回车=取消）"
+        $answer = Read-Host "     你的 Obsidian 库"
+        if (-not $answer) { Write-Warn "已取消"; return }
+        if ($answer -match '^\d+$' -and $detected.Count -ge [int]$answer -and [int]$answer -ge 1) {
+            $vault = $detected[[int]$answer - 1].Path
+        } else {
+            $vault = $answer
+        }
+    }
+
+    $vault = $vault.Trim().Trim('"').TrimEnd('\', '/')
+    if (-not (Test-Path $vault -PathType Container)) {
+        throw "路径不存在或不是文件夹：$vault"
+    }
+
+    Write-Step "写入配置 apps\backend\.env"
+    Set-EnvValue "AKC_VAULT_PATH" ($vault -replace '\\', '/')
+    Write-Ok "AKC_VAULT_PATH = $vault"
+
+    # 重启后端让配置生效；启动失败时不要中断，配置本身已经写好了
+    try {
+        Invoke-Stop
+        Invoke-Start
+    } catch {
+        Write-Warn "后端重启未成功：$($_.Exception.Message.Trim())"
+        Write-Host "     配置已写入，稍后双击 start.bat 即可生效"
+    }
+    Write-Host ""
+    try {
+        $status = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/v1/obsidian/status" -TimeoutSec 5
+        if ($status.configured) {
+            Write-Ok "Obsidian 已连接：$($status.vault_path)"
+            Write-Host "     AI 笔记会写到：$($status.vault_path)\$($status.raw_folder)（原始对话）"
+            Write-Host "                    $($status.vault_path)\$($status.knowledge_folder)（提炼的知识）"
+            Write-Host "     回到扩展侧边栏点「写入 Obsidian」即可。（首次写入时自动创建这些子目录）"
+        } else {
+            Write-Warn "配置已写入，但后端仍报告未配置：$($status | ConvertTo-Json -Compress)"
+        }
+    } catch {
+        Write-Warn "无法确认状态（$($_.Exception.Message.Trim())），请手动访问 http://127.0.0.1:$Port/api/v1/obsidian/status"
+    }
 }
 
 function Get-StartupCmd {
@@ -339,6 +443,7 @@ switch ($Command) {
     "restart"    { Invoke-Stop; Invoke-Start }
     "status"     { Invoke-Status }
     "autostart"  { Invoke-Autostart }
+    "set-vault"  { Invoke-SetVault }
     "uninstall"  { Invoke-Uninstall }
     "open"       { Start-Process "http://127.0.0.1:$Port/api/v1/health" }
 }

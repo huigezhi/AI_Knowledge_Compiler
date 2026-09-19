@@ -66,6 +66,27 @@ async function saveAll(): Promise<void> {
   setStatus("设置已保存");
 }
 
+/** 展示 Obsidian 连接状态（vault 路径由后端 .env 配置，不在此页）。 */
+async function refreshVaultStatus(): Promise<void> {
+  const node = el("vault-status");
+  try {
+    const status = await currentClient().obsidianStatus();
+    if (status.configured) {
+      node.textContent = `已连接：${status.vault_path}（原始对话 → ${status.raw_folder}，知识 → ${status.knowledge_folder}）`;
+      node.style.color = "#7ee787";
+    } else {
+      node.textContent =
+        "未连接。请双击 scripts\\windows\\set-vault.bat 选择你的 Obsidian 库（该脚本会自动识别已安装的库并重启后端）。";
+      node.style.color = "#ffb86b";
+    }
+  } catch (error) {
+    node.textContent = `无法检查（后端未连接？）：${
+      error instanceof OfflineError ? error.message : String(error)
+    }`;
+    node.style.color = "#ff8080";
+  }
+}
+
 async function testConnection(): Promise<void> {
   setStatus("正在连接…");
   const patch = collect();
@@ -82,12 +103,14 @@ async function testConnection(): Promise<void> {
           : `连接失败：${String(error)}`;
     setStatus(message, false);
   }
+  await refreshVaultStatus();
 }
 
 async function boot(): Promise<void> {
   fill(await loadSettings());
   el("btn-test").addEventListener("click", () => void testConnection());
   el("btn-save").addEventListener("click", () => void saveAll());
+  await refreshVaultStatus();
 }
 
 void boot();

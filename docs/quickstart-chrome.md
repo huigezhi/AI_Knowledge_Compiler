@@ -98,26 +98,44 @@ http://127.0.0.1:38127/api/v1/health
 
 ---
 
-## 想看知识变成 Obsidian 笔记？（可选）
+## 想看知识变成 Obsidian 笔记？
 
-需要两样配置，都在 `apps\backend\.env` 这个文件里（用记事本打开）：
+**第一步：连接你的 Obsidian 库（一键，不需要懂配置）**
+
+双击：
+```
+E:\workbuddy_files\AI_Knowledge_Compiler\scripts\windows\set-vault.bat
+```
+
+它会**自动列出你电脑上已安装的 Obsidian 库**，你只要输入序号即可；也可以直接把库文件夹
+拖到这个 bat 上，或者运行时粘贴路径。选好后它会自动写入配置并重启后端。
+
+> 它只会在你的库里新建三个子目录（`01_Raw` 原始对话 / `03_Knowledge` 提炼的知识 /
+> `02_Inbox`），**不会改动你已有的笔记**。
+> 想换库：再运行一次；想取消连接：`akc.ps1 set-vault -Clear`。
+
+连接是否成功，可以在扩展的**选项页**直接看到（有一行「Obsidian 知识库：已连接 …」）。
+
+**第二步（可选）：配置 Claude 才能让 AI 提炼知识**
+
+编辑 `apps\backend\.env`（记事本打开）：
 
 ```env
-AKC_VAULT_PATH=E:/Obsidian/你的库名        # 你的 Obsidian 库文件夹
 AKC_CLAUDE_ENABLED=true                    # 想用 AI 编译就写 true
 AKC_CLAUDE_MODEL=claude-sonnet-4-5         # 模型名
 AKC_CLAUDE_API_KEY=sk-ant-xxxx             # 你的 Claude 密钥
 ```
 
-改完**重启后端**（先双击 `stop.bat`，再双击 `start.bat`）。
-之后在侧边栏点「写入 Obsidian」，笔记就会出现在你的库里：
+改完**重启后端**（双击 `stop.bat` 再 `start.bat`，或 `start-foreground.bat`）。
+
+之后在侧边栏点「写入 Obsidian」，笔记就会出现：
 
 ```
 01_Raw/DeepSeek/对话标题-2026-09-19.md      ← 原始对话
 03_Knowledge/Methods/xxx.md                 ← AI 提炼的知识
 ```
 
-> 不配也能用，只是数据只存在本地数据库里，不会生成 Obsidian 笔记。
+> 不配 Claude 也能用：那就只会保存原始对话，不会生成提炼的知识笔记。
 
 ---
 

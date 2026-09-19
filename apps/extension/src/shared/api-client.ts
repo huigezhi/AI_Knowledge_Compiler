@@ -41,7 +41,9 @@ export class ApiError extends Error {
   /** 面向用户的中文文案：后端英文 message → 可读提示。 */
   get userMessage(): string {
     if (this.payload?.code === "OBSIDIAN_VAULT_NOT_CONFIGURED") {
-      return "还没有配置 Obsidian Vault 路径，请在设置页填写后重试。";
+      // Vault 路径是**后端**（电脑上的 .env）配置，不在本扩展设置页里，
+      // 因此文案必须指向正确的位置，否则用户会像无头苍蝇一样在设置页里找。
+      return "还没连接 Obsidian 库。请在电脑上双击 scripts\\windows\\set-vault.bat 选择你的库，然后重试。";
     }
     if (this.payload?.code === "SCHEMA_VALIDATION_FAILED") {
       return "采集结果不符合数据规范，可能是平台页面结构变化，请更新适配器后再试。";
@@ -185,6 +187,17 @@ export class AkcApiClient {
       method: "POST",
       body: { target_knowledge_id: targetKnowledgeId, reason },
     });
+  }
+
+  /** Obsidian 连接状态：vault 路径是否已配置。 */
+  obsidianStatus() {
+    return this.request<{
+      vault_path: string | null;
+      configured: boolean;
+      raw_folder: string;
+      knowledge_folder: string;
+      inbox_folder: string;
+    }>("/obsidian/status");
   }
 
   syncObsidian(payload: { knowledge_ids?: string[]; conversation_ids?: string[] }) {

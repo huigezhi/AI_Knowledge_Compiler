@@ -58,6 +58,17 @@
     </fieldset>
 
     <fieldset>
+      <legend>Obsidian 知识库</legend>
+      <div id="vault-status">正在检查…</div>
+      <p class="hint">
+        Vault 路径由**电脑上的后端**配置（不在本设置页）。连接方法：
+        双击 <code>scripts\windows\set-vault.bat</code>，它会自动识别你电脑上已安装的
+        Obsidian 库并让你选择，然后重启后端。取消连接用
+        <code>akc.ps1 set-vault -Clear</code>。
+      </p>
+    </fieldset>
+
+    <fieldset>
       <legend>采集策略</legend>
       <label for="batch-size">批量同步单次上限</label>
       <input id="batch-size" type="number" min="1" max="200" />

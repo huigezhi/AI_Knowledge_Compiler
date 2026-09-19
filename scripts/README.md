@@ -7,10 +7,13 @@ scripts/
 ├── windows/                 # 本机一键管理（双击 .bat 即可）
 │   ├── install.bat          # 安装：venv + 依赖 + 扩展构建 + 生成 .env
 │   ├── start.bat            # 启动后端（后台常驻）
+│   ├── start-foreground.bat # 前台启动（日志直接打在窗口里，排错用）
 │   ├── stop.bat             # 停止
 │   ├── restart.bat          # 重启
 │   ├── status.bat           # 状态与健康检查
+│   ├── set-vault.bat        # 连接 Obsidian 库（自动识别已安装的库）
 │   ├── autostart.bat        # 登录即自动启动（一次性配置）
+│   ├── build-extension.bat  # 改完适配器后重建扩展
 │   ├── uninstall.bat        # 卸载（保留数据；-Purge 全删）
 │   └── akc.ps1              # 上面所有命令的实现（也可命令行调用）
 └── linux/                   # VPS 常驻服务
@@ -55,7 +58,27 @@ cd scripts\windows
   `status` 会显示当前自启状态，`autostart -Off` 或 `uninstall` 会清理。
 - 只有在确实需要「计划任务」时才加 `-AsTask`：**根目录注册任务要求管理员权限**，
   非管理员运行会报「拒绝访问」（HRESULT 0x80070005）——所以默认不走这条路。
+- `start` 采用三级回退（常规 Start-Process → 干净环境 → CIM），兼容某些会话里
+  进程环境块存在 `Path`/`PATH` 重复键的异常情况；
+  若仍启动不了，用 `start-foreground.bat`（前台跑，日志直接可见）最直观。
 - 首次启动会在 `apps\backend\data\auth_token` 生成本地令牌，扩展必须填它。
+
+### 连接 Obsidian 库
+
+Vault 路径属于**后端配置**（写在 `apps\backend\.env` 的 `AKC_VAULT_PATH`），
+不在扩展的设置页里。三种指定方式，任选其一：
+
+```powershell
+# 1) 双击 set-vault.bat —— 自动列出你电脑上已安装的 Obsidian 库，输入序号即可
+# 2) 把库文件夹直接拖到 set-vault.bat 上（路径作为参数传入）
+# 3) 命令行指定
+.\akc.ps1 set-vault -VaultPath "D:\MyVault"
+.\akc.ps1 set-vault -Clear          # 取消连接
+```
+
+脚本会校验路径、按需创建/更新 `.env` 中的 `AKC_VAULT_PATH`（写 UTF-8 无 BOM，避免首键被 BOM 破坏）、
+重启后端，并回读 `/api/v1/obsidian/status` 确认结果。AKC 只在库里新建
+`01_Raw` / `02_Inbox` / `03_Knowledge` 三个子目录，不改动已有笔记。
 
 ---
 
