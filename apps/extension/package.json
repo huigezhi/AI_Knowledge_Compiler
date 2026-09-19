@@ -6,7 +6,7 @@
   "description": "AI Knowledge Compiler — Chrome MV3 extension (side panel, provider adapters, capture & sync)",
   "scripts": {
     "dev": "vite build --watch",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "fixtures": "node scripts/gen-fixtures.mjs"
