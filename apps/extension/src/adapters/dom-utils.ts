@@ -26,8 +26,20 @@ export interface Selectors {
   message: SelectorSpec;
   /** 消息角色来源：属性名（可给多个候选，按顺序取第一个有效的） */
   roleAttr: SelectorSpec;
+  /**
+   * 角色标记（用于没有 role 属性的平台，如豆包）：
+   * 元素自身或祖先（≤3 层）命中这些选择器时，直接判定为对应角色。
+   * 优先于 roleAttr 与 class 启发式。
+   */
+  assistantIfMatches?: SelectorSpec;
+  userIfMatches?: SelectorSpec;
   /** 消息正文容器 */
   content: SelectorSpec;
+  /**
+   * 从正文中剔除的子树（不影响页面，仅在采集副本上移除）。
+   * 典型用途：豆包的「已完成思考」思考过程块 —— 它是过程的噪声，不是要沉淀的知识。
+   */
+  excludeFromContent?: SelectorSpec;
   /** 会话标题 */
   title: SelectorSpec;
   /** 历史会话列表项（用于批量同步） */
@@ -59,10 +71,79 @@ export function describeSelector(selector: SelectorSpec): string {
   return Array.isArray(selector) ? selector.join(" | ") : selector;
 }
 
+/**
+ * 取**最深**的匹配节点（文档顺序中的最后一个）。
+ *
+ * 用途：有些平台为了做行内省略/渐变，把同一段文字放在多层嵌套元素里重复渲染
+ * （豆包的会话标题就是三层嵌套），取最外层会得到 "标题标题标题"。
+ * 嵌套场景下最内层节点在文档顺序里排在最后，因此取最后一个即为干净文本。
+ */
+export function queryDeepest(root: ParentNode, selector: SelectorSpec): Element | null {
+  const matched = queryAll(root, selector);
+  return matched.length > 0 ? (matched[matched.length - 1] as Element) : null;
+}
+
+/**
+ * 取元素**自身**的首个非空文本节点。
+ *
+ * 用途：平台为做行内省略会给标题套多层元素，且每层都带一份相同文字
+ * （豆包实测：外层 textContent 是「IP地址IP地址」）。此时整树 textContent 会重复，
+ * 而元素自身的文本节点恰好是干净标题。
+ * 元素没有直接文本节点（纯容器）时返回 null，由调用方回退。
+ */
+export function firstOwnText(element: Element | null): string | null {
+  if (!element) return null;
+  for (const node of Array.from(element.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = (node.textContent ?? "").trim();
+      if (text) return text;
+    }
+  }
+  return null;
+}
+
+/** 标题类字段的统一取值：优先自身文本，其次整树文本。 */
+export function readTitle(element: Element | null, fallback = ""): string {
+  return (firstOwnText(element) ?? element?.textContent ?? fallback).trim();
+}
+
 /** 从属性或回退策略推断角色；无法判断时返回 ``unknown``（不猜测）。 */
 const KNOWN_ROLES: ReadonlySet<string> = new Set(["user", "assistant", "system", "tool"]);
 
-export function inferRole(element: Element, roleAttr: SelectorSpec): MessageRole {
+/** 角色标记：命中即判定（用于没有 role 属性的平台，如豆包的 [data-reply-message]）。 */
+export interface RoleMarkers {
+  assistant?: SelectorSpec;
+  user?: SelectorSpec;
+}
+
+/** 元素自身或前 N 层祖先是否命中任一选择器候选。 */
+function matchesSelfOrAncestor(element: Element, spec: SelectorSpec | undefined, depth = 3): boolean {
+  if (!spec) return false;
+  const candidates = Array.isArray(spec) ? spec : [spec];
+  let node: Element | null = element;
+  for (let level = 0; node && level <= depth; level += 1) {
+    for (const candidate of candidates) {
+      try {
+        if (node.matches(candidate)) return true;
+      } catch {
+        // 非法选择器忽略，不影响其它候选
+      }
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
+
+export function inferRole(
+  element: Element,
+  roleAttr: SelectorSpec,
+  markers: RoleMarkers = {},
+): MessageRole {
+  // 1) 平台自带的角色标记最可靠（豆包：[data-reply-message="true"] 表示 AI 回复）
+  if (matchesSelfOrAncestor(element, markers.assistant)) return "assistant";
+  if (matchesSelfOrAncestor(element, markers.user)) return "user";
+
+  // 2) 显式角色属性
   for (const attr of Array.isArray(roleAttr) ? roleAttr : [roleAttr]) {
     const raw =
       element.getAttribute(attr) ?? element.closest(`[${attr}]`)?.getAttribute(attr) ?? undefined;
@@ -72,7 +153,8 @@ export function inferRole(element: Element, roleAttr: SelectorSpec): MessageRole
     if (value === "human") return "user";
     if (value === "ai" || value === "bot" || value === "model" || value === "answer") return "assistant";
   }
-  // 次级策略：常见 class 命名
+
+  // 3) 次级策略：常见 class 命名
   const className = `${element.className ?? ""}`.toLowerCase();
   if (className.includes("user") || className.includes("human") || className.includes("question")) {
     return "user";

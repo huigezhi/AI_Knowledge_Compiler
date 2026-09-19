@@ -117,22 +117,55 @@ node scripts/probe-real-page.mjs --clone-profile --url https://www.doubao.com/ch
 
 ## 7. 实测结构记录（逐步补充，勿凭猜测改选择器）
 
-### 豆包 `www.doubao.com`（2026-09-19 实测，游客态）
+### 豆包 `www.doubao.com`（2026-09-19 **线上登录态实测**，Chrome 153）
 
-探测方式：`node apps/extension/scripts/probe-real-page.mjs --url https://www.doubao.com/chat/`
+探测方式：`node scripts/verify-live.mjs --provider doubao --url https://www.doubao.com/chat/<id>`
+（把生产适配器打包注入真实页面执行，见 §8）。**adapter_version 已升至 0.2.0。**
 
-| 结论 | 说明 |
-| --- | --- |
-| **不存在 `data-role`** | 原 `SELECTORS.message = "[data-role]"` 完全失效，这是用户实测报错的直接原因 |
-| **class 带构建 hash** | `content-cjRQVY` / `nav-link-IkIer0` / `input-content-container-bMefgL`，随版本变化，**禁止作为选择器** |
-| 可用的稳定标记 | `data-history-container="true"`（会话历史容器）、`data-empty-conversation="true"`（空会话）、`data-chatapp-style="default"` |
-| 输入框 | tiptap / ProseMirror（`.ProseMirror`），**必须逐字按键输入**（`fill()` 不生效） |
-| 游客态限制 | 未登录时**不允许发送消息**（回车无效、输入被清空），因此无法用游客态逼出消息容器结构 |
+| 目标 | 实测选择器 | 命中 |
+| --- | --- | --- |
+| 消息容器 / turn | `[data-message-id]` | 每条消息 1 个（user、assistant 各一） |
+| **角色判定** | AI：祖先 `[data-reply-message="true"]`；用户：自身 `justify-end` | 各 1 |
+| 正文 | `[data-container-type="block-v2"]` | 每条消息 1 个 |
+| 会话标题 | `[data-conversation-active="true"] span[class*="whitespace-nowrap"]:not([aria-hidden="true"])` | 1 |
+| 历史列表项 | `a[id^="conversation_"]`（内含 `[data-conversation-id]`） | 每个会话 1 个 |
+| 历史项标题 | `[data-conversation-id] span[class*="whitespace-nowrap"]:not([aria-hidden="true"])` | 1 |
+| 会话根 | `#root` / `[data-container-name="main"]` | 1 |
 
-**仍待确认**：消息容器（单条 user / assistant 消息）的选择器 —— 需要登录态且有消息的页面。
-在拿到之前，豆包适配器保持"宁可失败也不猜"，不做宽泛匹配。
+**三个必须记住的坑（都是线上撞出来的）**：
 
-## 8. 页面结构变化时的标准修复流程
+1. **不存在 `data-role`** —— 最初推断的 `[data-role]` / `.message-item` 在真实页面上命中 0，
+   这是用户报「未匹配到任何消息节点」的直接原因。角色只能靠 `data-reply-message` + `justify-end`。
+2. **class 名带构建 hash**（`content-jn3se3` / `nav-link-IkIer0`），随版本变化，**禁止作为选择器**。
+3. **标题有 aria-hidden 的影子副本**：豆包为做行内省略会额外渲染一份 `aria-hidden="true"` +
+   `visibility:hidden` 的重复文本。不排除它，标题会变成「标题标题」。
+   因此标题选择器必须带 `:not([aria-hidden="true"])`，并且取值用 `readTitle`（优先元素自身文本节点）。
+
+另外：`excludeFromContent` 会剔除 AI 回复里的「已完成思考」过程块
+（`[data-plugin-identifier*="thinking_block"]`）—— 它是过程噪声，不该进知识库。
+
+**仍然待办**：其余 4 个平台的选择器同样是推断的，应逐一用同一套流程校准。
+
+## 8. 线上验证（改完适配器必须做这一步）
+
+fixtures 单测只能证明"逻辑没退化"，证明不了"选择器在真实页面上有效"。真正的门禁是：
+
+```bash
+# 1) 用户侧：双击 scripts/windows/start-chrome-debug.bat 启动带调试端口的独立 Chrome，
+#    并在该窗口里登录目标平台（登录态保存在 AKC-DebugProfile，一次即可）
+# 2) 开发者侧：把生产适配器打包注入真实页面执行
+node apps/extension/scripts/verify-live.mjs --provider doubao \
+  --url https://www.doubao.com/chat/<conversation-id>
+```
+
+脚本会打印健康检查、标题、消息数、**角色序列**、内容块类型、历史标题，并以
+`[verify] PASS / FAIL` 给出结论。它执行的是 `src/adapters/**` 的**同一份生产代码**
+（esbuild 现场打包），不是另写的复刻逻辑。
+
+> 为什么不用"打开新浏览器"的常规自动化：目标平台需要登录，而全新实例没有登录态；
+> Chrome 136+ 又禁止在默认配置目录上开调试端口，因此必须使用独立配置目录。
+
+## 9. 页面结构变化时的标准修复流程
 
 0. 先跑上面 §6 的探针，拿到真实结构（不要盲改选择器）；
 1. 更新 `src/adapters/<provider>.ts` 的 `SELECTORS`

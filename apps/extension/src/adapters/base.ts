@@ -15,14 +15,17 @@ import type {
   ProviderId,
 } from "@akc/schema";
 import { contentHash } from "@akc/schema/hash";
-import type { Selectors } from "./dom-utils";
+import type { ContentBlock } from "@akc/schema";
+import type { SelectorSpec, Selectors } from "./dom-utils";
 import {
   describeSelector,
   domSignature,
   extractBlocks,
   inferRole,
   queryAll,
+  queryDeepest,
   queryFirst,
+  readTitle,
 } from "./dom-utils";
 
 export class AdapterParseError extends Error {
@@ -96,8 +99,11 @@ export function createDomAdapter(
         id: `${externalId}_${index}`,
         provider_message_id: nodeId,
         conversation_id: conversationId,
-        role: inferRole(node, selectors.roleAttr),
-        content: extractBlocks(contentNode),
+        role: inferRole(node, selectors.roleAttr, {
+          assistant: selectors.assistantIfMatches,
+          user: selectors.userIfMatches,
+        }),
+        content: extractContent(contentNode, selectors.excludeFromContent),
         sequence: index,
         created_at: node.querySelector("time")?.getAttribute("datetime") ?? undefined,
         content_hash: "", // 由 buildConversation 统一计算
@@ -106,8 +112,12 @@ export function createDomAdapter(
   }
 
   async function buildConversation(externalId: string): Promise<Conversation> {
-    const titleNode = queryFirst(root(), selectors.title);
-    const title = (titleNode?.textContent ?? document.title ?? "").trim() || "(untitled)";
+    // 标题取最深节点 + 自身文本：豆包等平台会把同一标题嵌套重复渲染
+    const titleNode = queryDeepest(root(), selectors.title);
+    const rawTitle = (titleNode ? readTitle(titleNode) : document.title ?? "").trim();
+    // 回退到 document.title 时常带站点名后缀（"问候 - 豆包"），按平台显示名剥掉
+    const title =
+      rawTitle.replace(new RegExp(`\\s*[-–—|·]\\s*${def.displayName}\\s*$`), "").trim() || "(untitled)";
     const conversationId = `local_${def.id}_${externalId}`;
 
     const messages: Message[] = [];
@@ -167,10 +177,10 @@ export function createDomAdapter(
       const origin = new URL(pageUrl() || "https://example.com").origin;
       const summaries = items.map((item) => {
         const href = item.getAttribute("href") ?? "";
-        const titleNode = queryFirst(item, selectors.historyTitle) ?? item;
+        const titleNode = queryDeepest(item, selectors.historyTitle) ?? item;
         return {
           provider_conversation_id: def.conversationIdFromHref(href) ?? href,
-          title: (titleNode.textContent ?? "").trim() || "(untitled)",
+          title: readTitle(titleNode) || "(untitled)",
           url: href ? new URL(href, origin).toString() : undefined,
         };
       });
@@ -240,4 +250,22 @@ export function createDomAdapter(
 
 function textOf(block: { type: string; text?: string }): string {
   return block.type === "code" ? `\`\`\`\n${block.text ?? ""}\n\`\`\`` : (block.text ?? "");
+}
+
+/**
+ * 提取正文块，并在**采集副本**上剔除噪声子树。
+ *
+ * 注意必须 clone 后处理：直接移除会破坏用户正在浏览的页面 DOM。
+ */
+function extractContent(container: Element, exclude?: SelectorSpec): ContentBlock[] {
+  if (!exclude) return extractBlocks(container);
+  const cloned = container.cloneNode(true) as Element;
+  for (const candidate of Array.isArray(exclude) ? exclude : [exclude]) {
+    try {
+      cloned.querySelectorAll(candidate).forEach((node) => node.remove());
+    } catch {
+      // 非法选择器忽略
+    }
+  }
+  return extractBlocks(cloned);
 }

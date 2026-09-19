@@ -6,23 +6,42 @@
 </head>
 <body>
   <main id="chat-container">
-    <div class="chat-title">三种优化方案对比</div>
+    <div class="w-fit min-w-0 flex items-center justify-center"><span>三种优化方案对比</span></div>
     <nav class="akc-history">
-      <a href="/chat/aaaaaaaaaa"><span class="akc-history-title">SQL 性能优化</span></a>
-      <a href="/chat/bbbbbbbbbb"><span class="akc-history-title">CTE 递归查询讨论</span></a>
-      <a href="/chat/cccccccccc"><span class="akc-history-title">索引失效排查</span></a>
+      <a id="conversation_aaaaaaaaaa" href="/chat/aaaaaaaaaa" class="group/conversation-item block rounded-dbx-lg">
+        <div data-conversation-id="aaaaaaaaaa" data-conversation-active="true" class="relative flex h-32 min-w-0 items-center gap-8 px-10">
+          <span class="size-20 shrink-0"></span>
+          <span class="min-w-0 flex-1 overflow-hidden"><span class="relative block min-w-0 overflow-hidden whitespace-nowrap flex-1">三种优化方案对比<span class="block whitespace-nowrap">三种优化方案对比</span><span aria-hidden="true" class="pointer-events-none absolute top-0 left-0 whitespace-nowrap">三种优化方案对比三种优化方案对比</span></span></span>
+        </div>
+      </a>
+      <a id="conversation_bbbbbbbbbb" href="/chat/bbbbbbbbbb" class="group/conversation-item block rounded-dbx-lg">
+        <div data-conversation-id="bbbbbbbbbb" class="relative flex h-32 min-w-0 items-center gap-8 px-10">
+          <span class="size-20 shrink-0"></span>
+          <span class="min-w-0 flex-1 overflow-hidden"><span class="relative block min-w-0 overflow-hidden whitespace-nowrap flex-1">CTE 递归查询讨论<span class="block whitespace-nowrap">CTE 递归查询讨论</span><span aria-hidden="true" class="pointer-events-none absolute top-0 left-0 whitespace-nowrap">CTE 递归查询讨论CTE 递归查询讨论</span></span></span>
+        </div>
+      </a>
+      <a id="conversation_cccccccccc" href="/chat/cccccccccc" class="group/conversation-item block rounded-dbx-lg">
+        <div data-conversation-id="cccccccccc" class="relative flex h-32 min-w-0 items-center gap-8 px-10">
+          <span class="size-20 shrink-0"></span>
+          <span class="min-w-0 flex-1 overflow-hidden"><span class="relative block min-w-0 overflow-hidden whitespace-nowrap flex-1">索引失效排查<span class="block whitespace-nowrap">索引失效排查</span><span aria-hidden="true" class="pointer-events-none absolute top-0 left-0 whitespace-nowrap">索引失效排查索引失效排查</span></span></span>
+        </div>
+      </a>
     </nav>
-    <div data-testid="message-item">
-      <div data-role="user" data-message-id="doubao-u1">
-        <div class="akc-content">
+    <div data-message-id="doubao-u1" class="flex-row flex w-full justify-end">
+      <div class="relative min-w-0 max-w-full">
+        <div data-container-type="block-v2" class="flex w-full flex-col gap-8">
         这几个方案怎么选？
         </div>
         <time datetime="2026-09-18T20:31:00+08:00"></time>
       </div>
     </div>
-    <div data-testid="message-item">
-      <div data-role="assistant" data-message-id="doubao-a1">
-        <div class="akc-content">
+    <div data-reply-message="true" class="w-full">
+      <div data-message-id="doubao-a1" class="relative grid w-full grid-cols-[minmax(0,1fr)_auto]">
+        <div class="relative z-0 max-w-full min-w-0">
+        <div data-container-type="block-v2" class="flex w-full flex-col gap-8">
+        <div data-plugin-identifier="block_type:10040 | thinking_block.scene:undefined" data-render-engine="node">
+          <div class="akc-thinking">已完成思考（这段是过程噪声，采集时应被剔除）</div>
+        </div>
         <p>三种方案对比：</p>
         <table>
           <tr><th>方案</th><th>耗时</th><th>风险</th></tr>
@@ -32,6 +51,7 @@
         </table>
         </div>
         <time datetime="2026-09-18T20:31:00+08:00"></time>
+        </div>
       </div>
     </div>
   </main>

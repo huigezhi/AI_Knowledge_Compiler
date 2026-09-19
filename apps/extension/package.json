@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "fixtures": "node scripts/gen-fixtures.mjs"
+    "fixtures": "node scripts/gen-fixtures.mjs",
+    "verify:live": "node scripts/verify-live.mjs",
+    "probe": "node scripts/probe-real-page.mjs"
   },
   "dependencies": {
     "@akc/schema": "file:../../packages/schema"

@@ -129,9 +129,11 @@ async function main() {
   }
 
   const reports = [];
+  const pages = [];
   try {
     for (const url of opts.urls) {
       const page = await context.newPage();
+      pages.push(page);
       console.log(`[probe] 打开 ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch((e) => {
         console.log(`[probe] 导航告警：${e.message}`);
@@ -200,8 +202,13 @@ async function main() {
       await page.close();
     }
   } finally {
-    if (opts.cdp) await browser.close().catch(() => {});
-    else await context.close().catch(() => {});
+    // 连接模式（CDP）下**不能** browser.close()：那会关掉用户正在用的浏览器实例。
+    // 只关掉本次探测新开的标签页，然后让进程退出、连接自然断开。
+    if (opts.cdp) {
+      for (const p of pages) await p.close().catch(() => {});
+    } else {
+      await context.close().catch(() => {});
+    }
     if (tempProfile) rmSync(tempProfile, { recursive: true, force: true });
   }
 

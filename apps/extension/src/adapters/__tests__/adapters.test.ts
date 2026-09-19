@@ -84,6 +84,10 @@ describe.each(CASES)("$id adapter", ({ id, adapter }) => {
     const conversation = await adapter.fetchCurrentConversation();
     expect(conversation.messages).toHaveLength(6);
     expect(conversation.messages.map((m) => m.sequence)).toEqual([0, 1, 2, 3, 4, 5]);
+    // 标题必须干净（豆包会把标题嵌套渲染三层，取最外层会得到"标题标题标题"）
+    expect(conversation.title).toBe("CTE 递归查询讨论");
+    expect(conversation.messages[0]?.role).toBe("user");
+    expect(conversation.messages[1]?.role).toBe("assistant");
   });
 
   it("保留代码块结构（不得只取 innerText）", async () => {
@@ -109,6 +113,17 @@ describe.each(CASES)("$id adapter", ({ id, adapter }) => {
     loadFixture(id, "long");
     const conversation = await adapter.fetchCurrentConversation();
     expect(conversation.messages).toHaveLength(20);
+  });
+
+  it("不采集思考过程等噪声块（豆包「已完成思考」）", async () => {
+    loadFixture(id, "minimal");
+    const conversation = await adapter.fetchCurrentConversation();
+    const all = conversation.messages
+      .flatMap((m) => m.content.map((b) => (b.type === "text" || b.type === "code" ? b.text : "")))
+      .join("\n");
+    expect(all).not.toContain("已完成思考（这段是过程噪声，采集时应被剔除）");
+    // fixture 里真实内容必须仍然存在
+    expect(all).toContain("先看执行计划");
   });
 
   it("异常页面：抓取失败且健康检查不为 healthy", async () => {

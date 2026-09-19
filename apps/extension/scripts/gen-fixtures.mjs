@@ -35,11 +35,70 @@ const PROVIDERS = {
     message: (role, id) => `data-message-id="${id}" data-role="${role}"`,
     withChatTitle: true,
   },
+  /**
+   * 豆包：选择器来自线上实测（见 docs/adapters.md §7），fixture 必须还原真实结构：
+   * - 消息容器 `[data-message-id]`
+   * - 用户消息容器自身带 `justify-end`；AI 消息父容器带 `data-reply-message="true"`
+   * - 正文容器 `[data-container-type="block-v2"]`
+   */
   doubao: {
     href: (id) => `/chat/${id}`,
-    turn: () => `data-testid="message-item"`,
-    message: (role, id) => `data-role="${role}" data-message-id="${id}"`,
+    turn: () => null, // 用自定义 buildMessage
+    message: (role, id) => `data-message-id="${id}"`,
     withChatTitle: true,
+    // 真实的页头标题元素不带稳定标记；标题实际取自侧边栏的激活项（index 0）
+    chatTitleHtml: (title) =>
+      `    <div class="w-fit min-w-0 flex items-center justify-center"><span>${title}</span></div>`,
+    historyNav: (conversationTitle) =>
+      `    <nav class="akc-history">\n` +
+      HISTORY.map(([id, title], index) => {
+        // 激活项就是当前会话，标题必须与 fixture 的会话标题一致（与线上一致）
+        const shown = index === 0 ? (conversationTitle ?? title) : title;
+        return (
+          `      <a id="conversation_${id}" href="/chat/${id}" class="group/conversation-item block rounded-dbx-lg">\n` +
+          `        <div data-conversation-id="${id}"${index === 0 ? ' data-conversation-active="true"' : ""} class="relative flex h-32 min-w-0 items-center gap-8 px-10">\n` +
+          `          <span class="size-20 shrink-0"></span>\n` +
+          `          <span class="min-w-0 flex-1 overflow-hidden">${doubaoTitleSpans(shown)}</span>\n` +
+          `        </div>\n` +
+          `      </a>`
+        );
+      }).join("\n") +
+      `\n    </nav>`,
+    buildMessage: (role, id, bodyHtml, timestamp) => {
+      const thinking =
+        role === "assistant"
+          ? `        <div data-plugin-identifier="block_type:10040 | thinking_block.scene:undefined" data-render-engine="node">\n` +
+            `          <div class="akc-thinking">已完成思考（这段是过程噪声，采集时应被剔除）</div>\n` +
+            `        </div>`
+          : null;
+      const inner = [
+        `        <div data-container-type="block-v2" class="flex w-full flex-col gap-8">`,
+        thinking,
+        bodyHtml,
+        `        </div>`,
+        `        <time datetime="${timestamp}"></time>`,
+      ]
+        .filter((line) => line !== null)
+        .join("\n");
+      if (role === "user") {
+        return [
+          `    <div data-message-id="${id}" class="flex-row flex w-full justify-end">`,
+          `      <div class="relative min-w-0 max-w-full">`,
+          inner,
+          `      </div>`,
+          `    </div>`,
+        ].join("\n");
+      }
+      return [
+        `    <div data-reply-message="true" class="w-full">`,
+        `      <div data-message-id="${id}" class="relative grid w-full grid-cols-[minmax(0,1fr)_auto]">`,
+        `        <div class="relative z-0 max-w-full min-w-0">`,
+        inner,
+        `        </div>`,
+        `      </div>`,
+        `    </div>`,
+      ].join("\n");
+    },
   },
   zhipu: {
     href: (id) => `/chat/${id}`,
@@ -55,7 +114,21 @@ const HISTORY = [
   ["cccccccccc", "索引失效排查"],
 ];
 
-function historyNav(provider) {
+/**
+ * 豆包标题的真实结构（线上实测 dump 得到）：
+ *   <span class="relative block … whitespace-nowrap …">标题            ← 命中
+ *     <span class="block whitespace-nowrap">标题</span>              ← 可见文本
+ *     <span aria-hidden="true" … whitespace-nowrap>标题标题</span>   ← 隐藏的影子副本
+ * 因此选择器必须排除 `[aria-hidden="true"]`，否则标题会变成「标题标题」。
+ */
+const doubaoTitleSpans = (title) =>
+  `<span class="relative block min-w-0 overflow-hidden whitespace-nowrap flex-1">${title}` +
+  `<span class="block whitespace-nowrap">${title}</span>` +
+  `<span aria-hidden="true" class="pointer-events-none absolute top-0 left-0 whitespace-nowrap">${title}${title}</span>` +
+  `</span>`;
+
+function historyNav(provider, conversationTitle) {
+  if (provider.historyNav) return provider.historyNav(conversationTitle);
   const items = HISTORY.map(
     ([id, title]) =>
       `      <a href="${provider.href(id)}"><span class="akc-history-title">${title}</span></a>`,
@@ -64,6 +137,8 @@ function historyNav(provider) {
 }
 
 function messageBlock(provider, role, id, bodyHtml, timestamp) {
+  // 结构特殊的平台（豆包）用自定义构造器还原真实 DOM
+  if (provider.buildMessage) return provider.buildMessage(role, id, bodyHtml, timestamp);
   return [
     `    <div ${provider.turn()}>`,
     `      <div ${provider.message(role, id)}>`,
@@ -101,10 +176,12 @@ function buildConversationHtml(provider, { title, messages }) {
     "<body>",
     '  <main id="chat-container">',
   ];
-  if (provider.withChatTitle) {
+  if (provider.chatTitleHtml) {
+    head.push(provider.chatTitleHtml(title));
+  } else if (provider.withChatTitle) {
     head.push(`    <div class="chat-title">${title}</div>`);
   }
-  head.push(historyNav(provider));
+  head.push(historyNav(provider, title));
   const body = messages.map((m) =>
     messageBlock(provider, m.role, m.id, m.body, m.at ?? "2026-09-18T20:31:00+08:00"),
   );

@@ -40,7 +40,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(
         id="doubao",
         display_name="豆包",
-        adapter_version="0.1.0",
+        adapter_version="0.2.0",
         origins=("doubao.com",),
     ),
     ProviderSpec(

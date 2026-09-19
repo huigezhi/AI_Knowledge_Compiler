@@ -12,7 +12,9 @@ import {
   extractBlocks,
   inferRole,
   queryAll,
+  queryDeepest,
   queryFirst,
+  readTitle,
 } from "../dom-utils";
 
 function mount(html: string): void {
@@ -83,6 +85,86 @@ describe("inferRole", () => {
   it("拿不准时返回 unknown（不猜测）", () => {
     mount('<div id="x" class="card"></div>');
     expect(inferRole(document.getElementById("x")!, "data-role")).toBe("unknown");
+  });
+});
+
+describe("角色标记（无 role 属性的平台，如豆包）", () => {
+  beforeEach(() => mount(""));
+
+  it("AI 消息：祖先带 data-reply-message=true 判为 assistant", () => {
+    mount('<div data-reply-message="true"><div id="m"></div></div>');
+    expect(inferRole(document.getElementById("m")!, "data-role", { assistant: '[data-reply-message="true"]' })).toBe(
+      "assistant",
+    );
+  });
+
+  it("用户消息：自身带 justify-end 判为 user", () => {
+    mount('<div id="m" class="flex-row flex w-full justify-end"></div>');
+    expect(inferRole(document.getElementById("m")!, "data-role", { user: ".justify-end" })).toBe("user");
+  });
+
+  it("两种标记同时命中时 assistant 优先", () => {
+    mount('<div data-reply-message="true"><div id="m" class="justify-end"></div></div>');
+    expect(
+      inferRole(document.getElementById("m")!, "data-role", {
+        assistant: '[data-reply-message="true"]',
+        user: ".justify-end",
+      }),
+    ).toBe("assistant");
+  });
+
+  it("标记只在 3 层祖先内生效（避免把整页容器误判）", () => {
+    mount('<div data-reply-message="true"><i><i><i><i><div id="deep"></div></i></i></i></i></div>');
+    expect(
+      inferRole(document.getElementById("deep")!, "data-role", { assistant: '[data-reply-message="true"]' }),
+    ).toBe("unknown");
+  });
+
+  it("没有标记时退回属性与 class 判定", () => {
+    mount('<div id="a" data-role="user"></div>');
+    expect(inferRole(document.getElementById("a")!, "data-role", {})).toBe("user");
+  });
+});
+
+describe("queryDeepest（嵌套重复渲染的标题）", () => {
+  beforeEach(() => mount(""));
+
+  it("取最内层节点，避免拿到重复文本", () => {
+    // 豆包式三层嵌套：最外层 textContent 是「标题标题标题」
+    mount(
+      '<div id="root"><span class="whitespace-nowrap">标题<span class="whitespace-nowrap">标题' +
+        '<span class="whitespace-nowrap">标题</span></span></span></div>',
+    );
+    const root = document.getElementById("root")!;
+    expect(queryAll(root, '[class*="whitespace-nowrap"]')).toHaveLength(3);
+    expect(queryFirst(root, '[class*="whitespace-nowrap"]')?.textContent).toBe("标题标题标题");
+    expect(queryDeepest(root, '[class*="whitespace-nowrap"]')?.textContent).toBe("标题");
+  });
+
+  it("无命中时返回 null", () => {
+    expect(queryDeepest(document, ".nope")).toBeNull();
+  });
+
+  it("readTitle 优先取元素自身文本，避开内层重复渲染", () => {
+    // 线上实测结构：外层带 whitespace-nowrap，内层不带但重复同一段文字
+    mount(
+      '<div id="root"><span class="whitespace-nowrap flex-1">IP地址' +
+        '<span class="absolute inset-0">IP地址</span></span></div>',
+    );
+    const root = document.getElementById("root")!;
+    const el = queryDeepest(root, '[class*="whitespace-nowrap"]')!;
+    expect(el.textContent).toBe("IP地址IP地址");
+    expect(readTitle(el)).toBe("IP地址");
+  });
+
+  it("readTitle 对纯容器元素回退到整树文本", () => {
+    mount('<div id="wrap"><span>真实标题</span></div>');
+    expect(readTitle(document.getElementById("wrap")!)).toBe("真实标题");
+  });
+
+  it("候选列表同样适用", () => {
+    mount('<div class="a">X</div><div class="a">X2</div>');
+    expect(queryDeepest(document, [".missing", ".a"])?.textContent).toBe("X2");
   });
 });
 
