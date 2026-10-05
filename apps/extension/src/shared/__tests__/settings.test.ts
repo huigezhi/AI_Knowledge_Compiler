@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   AUTO_SAVE_PRESET_SECONDS,
   DEFAULT_SETTINGS,
+  loadSettings,
   resolveAutoSaveDelaySeconds,
+  saveSettings,
+  shouldCompile,
   type ExtensionSettings,
 } from "@/shared/settings";
 
@@ -28,5 +31,47 @@ describe("自动保存间隔档位", () => {
     expect(DEFAULT_SETTINGS.autoSaveDelayPreset).toBe("5s");
     expect(resolveAutoSaveDelaySeconds(DEFAULT_SETTINGS)).toBe(5);
     expect(DEFAULT_SETTINGS.historySyncIntervalMinutes).toBe(10);
+  });
+});
+
+describe("是否开启 AI 编译", () => {
+  const base = DEFAULT_SETTINGS;
+
+  it("总开关关闭时，任何情况都不编译", () => {
+    expect(shouldCompile({ ...base, aiCompileEnabled: false, autoCompile: true })).toBe(false);
+    expect(shouldCompile({ ...base, aiCompileEnabled: false, autoCompile: false })).toBe(false);
+  });
+
+  it("总开关开启时，由「自动编译」决定是否编", () => {
+    expect(shouldCompile({ ...base, aiCompileEnabled: true, autoCompile: true })).toBe(true);
+    expect(shouldCompile({ ...base, aiCompileEnabled: true, autoCompile: false })).toBe(false);
+  });
+
+  it("默认开启编译", () => {
+    expect(base.aiCompileEnabled).toBe(true);
+    expect(shouldCompile(base)).toBe(true);
+  });
+});
+
+describe("设置持久化", () => {
+  beforeEach(async () => {
+    // 还原成默认，避免用例之间互相污染（storage 在测试环境下走内存兜底）
+    await saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  it("取消勾选「自动编译」后能被保存住，不会一刷新又变回勾选", async () => {
+    // 回归：loadSettings 里曾经无条件删除 autoCompile===false，
+    // 导致这个开关永远关不掉。
+    await saveSettings({ aiCompileEnabled: true, autoCompile: false });
+    const loaded = await loadSettings();
+    expect(loaded.autoCompile).toBe(false);
+    expect(shouldCompile(loaded)).toBe(false);
+  });
+
+  it("总开关关闭后能被持久化", async () => {
+    await saveSettings({ aiCompileEnabled: false });
+    const loaded = await loadSettings();
+    expect(loaded.aiCompileEnabled).toBe(false);
+    expect(shouldCompile(loaded)).toBe(false);
   });
 });

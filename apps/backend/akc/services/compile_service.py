@@ -18,7 +18,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from akc.compiler.client import ClaudeClient, ClaudeSettings
-from akc.compiler.extractor import run_extraction
+from akc.compiler.extractor import enforce_single_item, run_extraction
 from akc.compiler.prompts import EXTRACTOR_PROMPT_VERSION
 from akc.config import COMPILER_VERSION, Settings
 from akc.errors import AppError, ClaudeRequestError, LLMDisabledError
@@ -83,15 +83,12 @@ def compile_conversation(
         }
 
     # --- Candidate Retrieval（FTS5）---------------------------------------
-    related = related_knowledge_for_conversation(session, conversation_id)
-    existing_pool = [
-        {**item, "source_message_ids": []}
-        for item in kn_repo.search_fts(session, conversation.get("title") or "", limit=10)
-        if item.status in ("verified", "candidate", "review", "merged")
-    ] or []
-    pool: list[dict[str, Any]] = [
-        kn_repo.to_dict(item) for item in _load_pool(session, related)
-    ] or existing_pool
+    #
+    # 以前这里是二选一：命中「会话正文关键词」就用它，否则才退到「会话标题」。
+    # 结果是检索面很窄——同主题的旧知识只要没被其中一路命中，就进不了候选池，
+    # 于是每次都新建一条，"多个对话讨论同一主题应合并" 自然做不到。
+    # 现在三路检索**合并去重**：正文关键词 + 会话标题 + 最近更新的知识。
+    pool = _build_candidate_pool(session, conversation, conversation_id)
 
     # --- Extractor --------------------------------------------------------
     client = _claude_client(settings)
@@ -121,6 +118,8 @@ def compile_conversation(
         client.close()
 
     # --- Dedup / Merge / Write --------------------------------------------
+    # 兜底：即使调用方绕过 extractor（测试/直接构造），一个对话也只产出一条知识点。
+    output = enforce_single_item(output)
     valid_message_ids = {str(m["id"]) for m in messages}
     stats = {"created": 0, "updated": 0, "merged": 0, "ignored": 0, "review": 0}
     knowledge_ids: list[str] = []
@@ -202,19 +201,22 @@ def compile_conversation(
             target = kn_repo.get(session, decision.existing_knowledge_id or "")
             if target is None:
                 continue
+            # 关键：**先追加，绝不覆盖**。
+            # 以前这里直接 update_content(markdown=候选正文)，把已有知识整个替换掉；
+            # 而对 verified 目标更是只改状态、完全不落内容——新会话的正文就此丢失。
+            # 在"一个对话 = 一条知识点"的规则下，同主题的后续会话必然走进这个分支，
+            # 于是"已有知识点不丢失"被破坏。统一走 _fold_into_target：
+            # 只在候选确实带来新信息时以「## 补充」追加。
+            _fold_into_target(session, target, item, heading="补充")
             if target.status == "verified" and settings.require_review_for_conflicts:
+                # 追加本身是安全的（不覆盖），但仍把已确认的知识标回待审核，
+                # 让人工确认这次补充——既做到合并，又不绕过"verified 需人工把关"。
                 target.status = "review"
                 stats["review"] += 1
                 decisions.append(
                     {"title": title, "action": "review", "reason": decision.reason}
                 )
             else:
-                kn_repo.update_content(
-                    session,
-                    target,
-                    markdown=str(item.get("body_markdown") or ""),
-                    summary=str(item.get("summary") or ""),
-                )
                 stats["updated"] += 1
                 decisions.append({"title": title, "action": "update", "reason": decision.reason})
             kn_repo.link_sources(
@@ -232,13 +234,7 @@ def compile_conversation(
             # 合并不再只是"把来源挂上去"：把候选里**确实新增的信息**折叠进已有笔记，
             # 真正做到"相似知识点合并成一条"。语义几乎重复（相似度 >= 0.75）时不追加，
             # 避免同一句话在正文里堆两遍。
-            cand_summary = str(item.get("summary") or "").strip()
-            if (
-                cand_summary
-                and text_similarity(cand_summary, target.summary or target.markdown or "") < 0.75
-            ):
-                folded = f"{(target.markdown or '').rstrip()}\n\n## 补充\n\n{cand_summary}"
-                kn_repo.update_content(session, target, markdown=folded)
+            _fold_into_target(session, target, item)
             kn_repo.link_sources(
                 session,
                 knowledge_id=target.id,
@@ -335,6 +331,67 @@ def _load_pool(session: Session, related: list[dict[str, Any]]) -> list[Any]:
         if entity is not None:
             rows.append(entity)
     return rows
+
+
+# 参与合并判定的状态：已删除的不参与（避免把新内容合并进一条已被丢弃的知识）
+_MERGEABLE_STATUSES = ("verified", "candidate", "review", "merged")
+
+
+def _build_candidate_pool(
+    session: Session, conversation: dict[str, Any], conversation_id: str
+) -> list[dict[str, Any]]:
+    """合并三路检索，得到「可能与本次对话同主题」的已有知识候选池。
+
+    1. 会话正文关键词（FTS）——覆盖面最广，能命中没出现在标题里的主题；
+    2. 会话标题（FTS）——标题往往就是主题，权重高；
+    3. 最近更新的知识——兜底，让"刚聊过的主题"始终在候选里。
+    """
+    from akc.services.search import related_knowledge_for_conversation
+
+    pool: dict[str, dict[str, Any]] = {}
+
+    def add(entity: Any) -> None:
+        if entity is None or entity.status not in _MERGEABLE_STATUSES:
+            return
+        if entity.id in pool:
+            return
+        pool[entity.id] = kn_repo.to_dict(entity)
+
+    for item in _load_pool(
+        session, related_knowledge_for_conversation(session, conversation_id, limit=15)
+    ):
+        add(item)
+
+    title = str(conversation.get("title") or "").strip()
+    if title:
+        for entity in kn_repo.search_fts(session, title, limit=15):
+            add(entity)
+
+    # 兜底：最近更新的知识始终参与匹配，保证"刚聊过的话题"不会漏掉
+    recent, _total = kn_repo.list_knowledge(session, limit=30, offset=0)
+    for entity in recent:
+        add(entity)
+
+    return list(pool.values())
+
+
+def _fold_into_target(
+    session: Session, target: Any, item: dict[str, Any], *, heading: str = "补充"
+) -> bool:
+    """把候选里**新增的信息**追加进已有知识，返回是否真的追加了。
+
+    只在候选与已有正文不重复（相似度 < 0.75）时才追加，避免同一句话堆两遍；
+    **永不覆盖**已有内容（覆盖会导致历史沉淀丢失，无法恢复）。
+    """
+    cand_body = str(item.get("body_markdown") or "").strip() or str(item.get("summary") or "").strip()
+    if not cand_body:
+        return False
+    existing_body = target.markdown or target.summary or ""
+    if text_similarity(cand_body, existing_body) >= 0.75:
+        return False
+    folded = f"{(target.markdown or '').rstrip()}\n\n## {heading}\n\n{cand_body}"
+    kn_repo.update_content(session, target, markdown=folded)
+    return True
 
 
 def _pool_entry(entity: Any, source_ids: list[str]) -> dict[str, Any]:

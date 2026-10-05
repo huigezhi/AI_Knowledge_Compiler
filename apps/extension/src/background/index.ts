@@ -11,7 +11,7 @@ import { adapterForUrl } from "@/adapters/registry";
 import { AkcApiClient } from "@/shared/api-client";
 import { logger } from "@/shared/logger";
 import { isMessage, type CrawlProgress, type Message, type MessageResponse } from "@/shared/messaging";
-import { loadSettings, STORAGE_KEY, type ExtensionSettings } from "@/shared/settings";
+import { loadSettings, shouldCompile, STORAGE_KEY, type ExtensionSettings } from "@/shared/settings";
 
 chrome.runtime.onInstalled.addListener(() => {
   // 点击扩展图标直接打开 Side Panel（Chrome 116+）
@@ -258,7 +258,7 @@ async function runCrawl(tabId: number, limit: number, skipExisting: boolean | un
         );
         await api.importConversation(conversation, {
           write_raw_to_obsidian: settings.writeRawToObsidian,
-          compile: settings.autoCompile,
+          compile: shouldCompile(settings),
         });
         crawl.progress.ok += 1;
         consecutiveFailures = 0;
@@ -475,7 +475,7 @@ async function runSilentHistorySync(
           }
           await api.importConversation(response.conversation, {
             write_raw_to_obsidian: settings.writeRawToObsidian,
-            compile: settings.autoCompile,
+            compile: shouldCompile(settings),
           });
           silentProgress.ok += 1;
           consecutiveFailures = 0;
@@ -552,6 +552,16 @@ void scheduleHistorySync();
 chrome.storage?.onChanged?.addListener((changes, areaName) => {
   if (areaName === "local" && changes[STORAGE_KEY]) {
     void scheduleHistorySync();
+    // 「是否开启 AI 编译」不需要在这里重建任何东西：后台每一次入库都是
+    // 现读 loadSettings() 再走 shouldCompile()，改完立刻对下一次采集生效，
+    // 不必重新执行任何命令。这里只做一次可观测的记录，方便排查。
+    const before = changes[STORAGE_KEY].oldValue as Partial<ExtensionSettings> | undefined;
+    const after = changes[STORAGE_KEY].newValue as Partial<ExtensionSettings> | undefined;
+    if (before && after && before.aiCompileEnabled !== after.aiCompileEnabled) {
+      logger.info("ai_compile_switch_changed", {
+        enabled: after.aiCompileEnabled ?? true,
+      });
+    }
   }
 });
 
@@ -569,7 +579,7 @@ async function handleAutoSave(
   try {
     await api.importConversation(conversation, {
       write_raw_to_obsidian: settings.writeRawToObsidian,
-      compile: settings.autoCompile,
+      compile: shouldCompile(settings),
     });
     crawl.progress.lastAutoSaveAt = Date.now();
     crawl.progress.lastAutoSaveTitle = conversation.title;

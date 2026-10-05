@@ -84,3 +84,81 @@ def test_vault_failure_does_not_lose_raw_data(session: Session, settings: Settin
     conv = conv_repo.get(session, result["conversation_id"])
     assert conv is not None
     assert len(msg_repo.list_messages(session, conv.id)) == 2
+
+
+# ---------------------------------------------------------------- 编译开关
+def test_explicit_compile_false_overrides_server_auto_compile(
+    session: Session, settings: Settings
+) -> None:
+    """服务端开了 AKC_AUTO_COMPILE 时，客户端显式 compile=False 必须能关掉编译。
+
+    否则扩展里的「是否开启 AI 编译」开关形同虚设：服务端照样入队。
+    """
+    from akc.repositories import job as job_repo
+
+    settings.auto_compile = True
+    import_conversation(session, _payload(body="a"), options={"compile": False}, settings=settings)
+    jobs = [j for j in job_repo.list_jobs(session, limit=100) if j.job_type == "COMPILE_CONVERSATION"]
+    assert len(jobs) == 0, "显式 compile=False 却仍然入队了编译任务"
+
+
+def test_explicit_compile_true_enqueues_even_when_server_disabled(
+    session: Session, settings: Settings
+) -> None:
+    from akc.repositories import job as job_repo
+
+    settings.auto_compile = False
+    import_conversation(session, _payload(body="b"), options={"compile": True}, settings=settings)
+    jobs = [j for j in job_repo.list_jobs(session, limit=100) if j.job_type == "COMPILE_CONVERSATION"]
+    assert len(jobs) == 1
+
+
+def test_omitted_compile_falls_back_to_server_auto_compile(
+    session: Session, settings: Settings
+) -> None:
+    """不表态时沿用服务端配置（兼容脚本等不传该字段的调用方）。"""
+    from akc.repositories import job as job_repo
+
+    settings.auto_compile = True
+    import_conversation(session, _payload(body="c"), options={}, settings=settings)
+    jobs = [j for j in job_repo.list_jobs(session, limit=100) if j.job_type == "COMPILE_CONVERSATION"]
+    assert len(jobs) == 1
+
+
+# ---------------------------------------------------------------- 编译开关
+def test_explicit_compile_false_overrides_server_auto_compile(
+    session: Session, settings: Settings
+) -> None:
+    """服务端开了 AKC_AUTO_COMPILE 时，客户端显式 compile=False 必须能关掉编译。
+
+    否则扩展里的「是否开启 AI 编译」开关形同虚设：服务端照样入队。
+    """
+    from akc.repositories import job as job_repo
+
+    settings.auto_compile = True
+    import_conversation(session, _payload(body="a"), options={"compile": False}, settings=settings)
+    jobs = [j for j in job_repo.list_jobs(session, limit=100) if j.job_type == "COMPILE_CONVERSATION"]
+    assert len(jobs) == 0, "显式 compile=False 却仍然入队了编译任务"
+
+
+def test_explicit_compile_true_enqueues_even_when_server_disabled(
+    session: Session, settings: Settings
+) -> None:
+    from akc.repositories import job as job_repo
+
+    settings.auto_compile = False
+    import_conversation(session, _payload(body="b"), options={"compile": True}, settings=settings)
+    jobs = [j for j in job_repo.list_jobs(session, limit=100) if j.job_type == "COMPILE_CONVERSATION"]
+    assert len(jobs) == 1
+
+
+def test_omitted_compile_falls_back_to_server_auto_compile(
+    session: Session, settings: Settings
+) -> None:
+    """不表态时沿用服务端配置（兼容脚本等不传该字段的调用方）。"""
+    from akc.repositories import job as job_repo
+
+    settings.auto_compile = True
+    import_conversation(session, _payload(body="c"), options={}, settings=settings)
+    jobs = [j for j in job_repo.list_jobs(session, limit=100) if j.job_type == "COMPILE_CONVERSATION"]
+    assert len(jobs) == 1

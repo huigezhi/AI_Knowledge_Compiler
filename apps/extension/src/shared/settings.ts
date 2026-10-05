@@ -27,7 +27,15 @@ export function resolveAutoSaveDelaySeconds(settings: ExtensionSettings): number
 export interface ExtensionSettings {
   backendUrl: string;
   authToken: string;
-  /** 是否“保存后自动进入编译队列” */
+  /**
+   * AI 编译总开关：关闭后**完全不产生任何编译**（自动保存、静默同步、历史遍历、
+   * 手动「保存 + 编译」都不编译），只保留原始对话。
+   *
+   * 以前要停掉编译只能去跑 `akc.ps1 set-llm -Clear` 之类命令改后端配置再重启，
+   * 这个开关让它在设置页即时生效。
+   */
+  aiCompileEnabled: boolean;
+  /** 在总开关开启的前提下，是否“保存后自动进入编译队列” */
   autoCompile: boolean;
   /** 保存时是否同时把 Raw 写入 Obsidian */
   writeRawToObsidian: boolean;
@@ -64,6 +72,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   backendUrl: "http://127.0.0.1:38127",
   authToken: "",
   // 全自动链路的默认值：采集即编译，用户零操作
+  aiCompileEnabled: true,
   autoCompile: true,
   writeRawToObsidian: true,
   batchSize: 20,
@@ -78,6 +87,17 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   crawlItemTimeoutSeconds: 20,
   logLevel: "info",
 };
+
+/**
+ * 是否应该把这次采集送去编译——**唯一判定入口**。
+ *
+ * 后台、侧边栏、静默同步都必须走这里，避免三处各判断一次而出现
+ * "总开关关了但某条路径还在编译" 的漏网。
+ */
+export function shouldCompile(settings: ExtensionSettings): boolean {
+  if (!settings.aiCompileEnabled) return false;
+  return settings.autoCompile;
+}
 
 export const STORAGE_KEY = "akc.settings";
 
@@ -110,7 +130,10 @@ export async function loadSettings(): Promise<ExtensionSettings> {
   // 迁移：旧版默认 15 秒是"没改过"的标记，统一升到新的 5 秒默认值；
   // 用户显式改过的其它值不受影响。
   if (stored.autoSaveDelaySeconds === 15) delete stored.autoSaveDelaySeconds;
-  if (stored.autoCompile === false) delete stored.autoCompile;
+  // 注意：这里曾经无条件 `delete stored.autoCompile`（值为 false 时），
+  // 结果用户把「保存后自动进入编译队列」取消勾选后一刷新又是勾上的——
+  // 这个开关实际上永远关不掉。删掉这行，尊重用户的显式选择；
+  // 想关掉编译请用新的总开关 aiCompileEnabled。
   // 旧版存过 15 分钟周期的，视为"没主动改过"，跟随新的 10 分钟默认值
   if (stored.historySyncIntervalMinutes === 15) delete stored.historySyncIntervalMinutes;
   return { ...DEFAULT_SETTINGS, ...stored } as ExtensionSettings;

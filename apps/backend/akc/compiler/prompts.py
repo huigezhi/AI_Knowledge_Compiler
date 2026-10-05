@@ -11,8 +11,13 @@ from __future__ import annotations
 import textwrap
 from typing import Any
 
-EXTRACTOR_PROMPT_VERSION = "extractor-v2"
+EXTRACTOR_PROMPT_VERSION = "extractor-v3"
 MERGE_PLANNER_PROMPT_VERSION = "merge-planner-v1"
+
+# 为什么升到 v3：v2 把「一个会话只出一条」写成软规则（"通常 1 条，最多 N 条"），
+# 而模型的天然倾向是"把每个细节拆成一条知识"——软规则挡不住，结果一个对话被拆成
+# 好几条知识点。v3 改成硬约束，并在代码里再加一道兜底（见 extractor._enforce_single_item），
+# 不再依赖模型自觉。
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
@@ -52,16 +57,45 @@ KNOWLEDGE_DOMAINS = [
     "其他",
 ]
 
+# 「属于同一知识点」的判定依据。
+#
+# 这份文本同时是给模型看的规则，也是代码里 merge_planner 的判定口径，
+# 两处必须保持一致 —— 所以常量放在这里，由 Prompt 与单测共同引用，避免漂移。
+SAME_KNOWLEDGE_CRITERIA = textwrap.dedent(
+    """
+    1. 同一主题域（domain）：两条内容的 domain 必须相同。
+       不同域一律不算同一知识点（例如「旅游出行」与「编程技术」不合并）。
+    2. 核心命题同一：标题与摘要讲的是同一件事，而不是"碰巧提到同一个词"。
+       代码口径 = 标题/摘要的字符 bigram Jaccard 相似度：
+       >= 0.72 判为同一；0.45 ~ 0.72 判为相关但未定（作为补充或转人工）；< 0.45 判为不同。
+    3. 核心实体有交集：两条内容涉及的主要对象/概念有重叠。
+       完全没有共同实体、仅标题勉强相似的，不算同一知识点。
+    4. 证据可并存：来自不同消息、不同会话的同类内容，视为同一知识点的**补充证据**，
+       应合并进已有条目（merge_action=merge/update），而不是新建一条。
+    5. 例外（不合并）：
+       - type 为 opinion / question 的内容不进入合并链路；
+       - 与已 verified 内容冲突的，只能 review，绝不静默覆盖。
+    """
+).strip()
+
 _EXTRACTION_INSTRUCTIONS = textwrap.dedent(
     """
     Consolidate the conversation above into durable knowledge.
 
-    核心原则：**汇聚，而不是罗列**。
-    - 通常整场对话只输出 1 条知识点：把同类、同主题的要点合并成一条结构化笔记
-      （用小节组织正文），绝不把每个细节拆成独立 item。
-    - 仅当对话确实横跨多个不同 <domains> 主题时才拆分，且最多 {max_items} 条。
-    - 与 <related_knowledge> 中已有知识相同的要点，直接并入对应条目
-      （merge_action=update/merge），不要重复创建。
+    ## 硬约束：一个对话 = 一条知识点
+    - **整场对话必须且只能输出 1 条 item**，`items` 数组的长度恒为 1。
+      这不是"建议"，违反即视为输出不合格。
+    - 对话里出现的多个要点，一律用正文的**小节（##）**组织进这一条，
+      绝不拆成多条 item，哪怕它们看起来像不同的小话题。
+    - 如果对话确实横跨多个主题域：选**对话最终落脚的那个主题**作为这一条的 domain，
+      其余主题作为正文里的次要小节带过。
+    - 标题要能概括整场对话（而不是其中某一个小点）。
+
+    ## 与已有知识的关系
+    - 先看 <related_knowledge>：已有条目里只要符合下面的「同一知识点判定依据」，
+      就必须并入它（merge_action=merge 或 update），并把它的 id 填进
+      `candidate_existing_knowledge_ids`，**不要新建**。
+    - 判定依据见 <same_knowledge_criteria>。
     """
 ).strip()
 
@@ -84,9 +118,14 @@ _EXTRACTOR_TEMPLATE = textwrap.dedent(
 
     <domains>{domains}</domains>
 
+    <same_knowledge_criteria>
+    {criteria}
+    </same_knowledge_criteria>
+
     <output_budget>
-    - 最多 {max_items} 条 items；宁可把相近内容合并成一条，也不要逐条罗列。
-    - 每条 summary 不超过 60 字；body_markdown 不超过 {max_body_chars} 字。
+    - **items 数组必须且只能有 1 条**（一个对话 = 一条知识点）。输出 0 条或 2 条以上均为不合格。
+    - 该条的 summary 不超过 60 字；body_markdown 不超过 {max_body_chars} 字。
+      内容多就用小节压缩，不要靠增加条数来容纳。
     - entities 最多 8 个，relations 最多 5 条，contradictions 最多 3 条，notes 最多 3 条。
     - 总输出必须能一次性写完，绝不能因为长度被截断：宁少勿多。
     </output_budget>
@@ -192,15 +231,15 @@ def build_extractor_prompt(
     related_knowledge: list[dict[str, Any]],
     *,
     max_chars: int = 50_000,
-    max_items: int = 3,
-    max_body_chars: int = 600,
+    max_body_chars: int = 900,
 ) -> str:
-    """``max_items`` / ``max_body_chars`` 是**输出预算**。
+    """``max_body_chars`` 是**输出预算**；条数不再是预算项。
 
-    DeepSeek / Claude 的单次输出上限是硬性的（DeepSeek 为 8192 token），
-    而模型的默认倾向是"把每个细节都拆成一条知识"——实测一轮就写满 8192 token
-    被截断，截断的 JSON 必然解析失败，任务永远失败。
-    汇聚式抽取（见 ``_EXTRACTION_INSTRUCTIONS``）之后 1-3 条是常态，预算更宽裕。
+    一个对话恒等于一条知识点（见 ``_EXTRACTION_INSTRUCTIONS`` 的硬约束），
+    所以这里没有 ``max_items`` 参数——留着它等于给模型"可以拆多条"的暗示。
+
+    ``max_body_chars`` 仍需收紧：DeepSeek 的单次输出上限是硬性的 8192 token，
+    被截断的 JSON 必然解析失败。条数固定为 1 之后，能调的就只剩正文长度。
     """
     return _EXTRACTOR_TEMPLATE.format(
         provider=conversation.get("provider", ""),
@@ -212,8 +251,8 @@ def build_extractor_prompt(
         taxonomy_inline=TAXONOMY.replace(", ", "|"),
         domains="、".join(KNOWLEDGE_DOMAINS),
         domains_inline="|".join(KNOWLEDGE_DOMAINS),
-        instructions=_EXTRACTION_INSTRUCTIONS.format(max_items=max_items),
-        max_items=max_items,
+        criteria=SAME_KNOWLEDGE_CRITERIA,
+        instructions=_EXTRACTION_INSTRUCTIONS,
         max_body_chars=max_body_chars,
     )
 

@@ -16,6 +16,19 @@ function syncDelayPresetUi(): void {
   el("auto-save-delay-custom").hidden = !custom;
 }
 
+/**
+ * 总开关与「自动编译」的联动。
+ *
+ * 总开关关掉时，下面那个「保存后自动进入编译队列」不再有意义，
+ * 灰掉它并说明原因，避免出现"两个开关互相矛盾、用户不知道哪个生效"。
+ */
+function syncCompileUi(): void {
+  const enabled = el<HTMLInputElement>("ai-compile-enabled").checked;
+  el<HTMLInputElement>("auto-compile").disabled = !enabled;
+  el("ai-compile-on-hint").hidden = !enabled;
+  el("ai-compile-off-hint").hidden = enabled;
+}
+
 function fill(settings: ExtensionSettings): void {
   el<HTMLInputElement>("backend-url").value = settings.backendUrl;
   el<HTMLInputElement>("auth-token").value = settings.authToken;
@@ -27,7 +40,9 @@ function fill(settings: ExtensionSettings): void {
   el<HTMLInputElement>("crawl-skip-existing").checked = settings.crawlSkipExisting;
   el<HTMLInputElement>("crawl-item-timeout").value = String(settings.crawlItemTimeoutSeconds);
   el<HTMLInputElement>("write-raw").checked = settings.writeRawToObsidian;
+  el<HTMLInputElement>("ai-compile-enabled").checked = settings.aiCompileEnabled;
   el<HTMLInputElement>("auto-compile").checked = settings.autoCompile;
+  syncCompileUi();
   el<HTMLInputElement>("history-auto-sync").checked = settings.historyAutoSync;
   el<HTMLInputElement>("history-sync-interval").value = String(settings.historySyncIntervalMinutes);
   el<HTMLSelectElement>("log-level").value = settings.logLevel;
@@ -46,6 +61,7 @@ function collect(): Partial<ExtensionSettings> {
     crawlSkipExisting: el<HTMLInputElement>("crawl-skip-existing").checked,
     crawlItemTimeoutSeconds: Math.min(120, Math.max(5, Number(el<HTMLInputElement>("crawl-item-timeout").value) || 20)),
     writeRawToObsidian: el<HTMLInputElement>("write-raw").checked,
+    aiCompileEnabled: el<HTMLInputElement>("ai-compile-enabled").checked,
     autoCompile: el<HTMLInputElement>("auto-compile").checked,
     historyAutoSync: el<HTMLInputElement>("history-auto-sync").checked,
     historySyncIntervalMinutes: Math.min(
@@ -59,6 +75,7 @@ function collect(): Partial<ExtensionSettings> {
 /** 采集策略区的实时联动（预设切换时显示/隐藏自定义秒数）。 */
 function wireLocalUi(): void {
   el<HTMLSelectElement>("auto-save-delay-preset").addEventListener("change", syncDelayPresetUi);
+  el<HTMLInputElement>("ai-compile-enabled").addEventListener("change", syncCompileUi);
 }
 
 function currentClient(): AkcApiClient {

@@ -19,7 +19,7 @@ import {
 } from "@/shared/api-client";
 import { logger, setLogLevel } from "@/shared/logger";
 import { isMessage, type CrawlProgress, type MessageResponse } from "@/shared/messaging";
-import { loadSettings, type ExtensionSettings } from "@/shared/settings";
+import { loadSettings, shouldCompile, STORAGE_KEY, type ExtensionSettings } from "@/shared/settings";
 
 const PROVIDER_LABEL: Record<string, string> = {
   chatgpt: "ChatGPT",
@@ -227,6 +227,38 @@ async function saveCurrent(withCompile: boolean): Promise<void> {
   }
 }
 
+/**
+ * 「是否开启 AI 编译」在面板上的体现。
+ *
+ * 按钮文案必须如实反映开关状态：否则用户点了「保存 + 编译」却什么也没编译出来，
+ * 只会以为功能坏了。
+ */
+function syncCompileSwitchUi(): void {
+  const btn = el<HTMLButtonElement>("btn-save-compile");
+  if (!state.settings.aiCompileEnabled) {
+    btn.textContent = "保存（编译已关闭）";
+    btn.title =
+      "AI 编译总开关已关闭：只会保存原始对话。在设置页开启后立刻生效，无需重启后端或执行命令。";
+    return;
+  }
+  btn.textContent = "保存 + 编译";
+  btn.title = shouldCompile(state.settings)
+    ? "保存当前会话并编译成知识笔记（后台自动保存时也会一并编译）"
+    : "保存并编译这一次；后台自动保存时不会自动编译";
+}
+
+/** 设置页改动后，侧边栏即时跟随（不用重开面板）。 */
+function watchSettings(): void {
+  chrome.storage?.onChanged?.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[STORAGE_KEY]) return;
+    void (async () => {
+      state.settings = await loadSettings();
+      setLogLevel(state.settings.logLevel);
+      syncCompileSwitchUi();
+    })();
+  });
+}
+
 async function loadHistory(options: { silent?: boolean } = {}): Promise<void> {
   clearError();
   const response = await toBackground({ type: "AKC/LIST_CONVERSATIONS" });
@@ -347,6 +379,15 @@ async function refreshCrawlStatus(): Promise<void> {
 // ------------------------------------------------------------------ 编译
 async function startCompile(conversationId: string): Promise<void> {
   clearError();
+  // 手动点「保存 + 编译」是显式意图，不受「自动编译」开关约束，
+  // 但要服从 AI 编译总开关——总开关关了就是完全不编译。
+  if (!state.settings.aiCompileEnabled) {
+    setText(
+      "sync-status",
+      "AI 编译已关闭：只保存了原始对话，未生成知识笔记（设置页可随时开启）。",
+    );
+    return;
+  }
   el<HTMLButtonElement>("btn-write-current").disabled = true;
   try {
     const job = await state.api.createCompileJob(conversationId);
@@ -864,6 +905,9 @@ async function boot(): Promise<void> {
   });
   wire();
   subscribeProgress();
+  syncCompileSwitchUi();
+  // 设置页改了「是否开启 AI 编译」要立刻反映到面板上，不用重开侧边栏
+  watchSettings();
   // 切标签页 / 页面加载完成后自动重识别平台：面板显示的永远是"用户现在看着的页面"
   watchActiveTab();
   // 历史模块自动加载：打开面板就能看到全部已采集会话，不用再点「加载历史」。

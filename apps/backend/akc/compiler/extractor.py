@@ -20,8 +20,10 @@ _MERGE_ACTIONS = {"create", "update", "merge", "ignore", "review"}
 
 
 # 输出预算梯次：先给足，被截断就逐档收紧，而不是直接判死。
-# 汇聚式抽取后通常 1 条就够；梯次里第 3 档是"整场对话压成 1 条"的兜底。
-_EXTRACTION_BUDGETS: tuple[tuple[int, int], ...] = ((3, 600), (2, 400), (1, 300))
+#
+# 条数恒为 1（一个对话 = 一条知识点），能收紧的只有正文长度。
+# 第二列才是预算项；第一列保留是为了让"条数"在代码里显式可见，避免后人又加回多条目。
+_EXTRACTION_BUDGETS: tuple[tuple[int, int], ...] = ((1, 900), (1, 600), (1, 350))
 
 
 def run_extraction(
@@ -40,12 +42,11 @@ def run_extraction(
     而是要写的东西太多。此时收紧输出预算重试，最多 ``_EXTRACTION_BUDGETS`` 档。
     """
     last_error: ClaudeOutputInvalidError | None = None
-    for attempt, (max_items, max_body_chars) in enumerate(_EXTRACTION_BUDGETS):
+    for attempt, (_max_items, max_body_chars) in enumerate(_EXTRACTION_BUDGETS):
         prompt = build_extractor_prompt(
             conversation,
             related_knowledge,
             max_chars=max_chars,
-            max_items=max_items,
             max_body_chars=max_body_chars,
         )
         try:
@@ -59,13 +60,13 @@ def run_extraction(
                 extra={
                     "extra_fields": {
                         "attempt": attempt + 1,
-                        "next_max_items": max_items,
+                        "next_max_body_chars": max_body_chars,
                     }
                 },
             )
             continue
 
-        normalized = _coerce(raw)
+        normalized = enforce_single_item(_coerce(raw))
         # 抢救回来的结果里一条都没剩下时，值得用更小的预算再试一次
         if not normalized["items"] and attempt + 1 < len(_EXTRACTION_BUDGETS):
             last_error = ClaudeOutputInvalidError(
@@ -103,6 +104,69 @@ def run_merge_planning(
         "proposed_markdown_patch": str(raw.get("proposed_markdown_patch", "")),
         "conflicts": raw.get("conflicts") or [],
     }
+
+
+def enforce_single_item(normalized: dict[str, Any]) -> dict[str, Any]:
+    """一个对话 = 一条知识点：模型输出多条时，折叠成一条。
+
+    Prompt 里已经是硬约束，但不能只靠模型自觉——实测它仍会把一个对话拆成好几条。
+    这里做**结构性兜底**：保留信息量最大的一条作为主体，把其余条目作为
+    「## 补充」小节折叠进它的正文，来源 id 合并，保证：
+    * 绝不因为一次调用产生第二条知识（这是用户需求的核心）；
+    * 也不丢内容——被折叠的要点仍然留在正文里，可溯源。
+    """
+    items: list[dict[str, Any]] = normalized.get("items") or []
+    if len(items) <= 1:
+        return normalized
+
+    def score(item: dict[str, Any]) -> tuple[int, int, int]:
+        # 耐久类型优先（观点/临时问题不配当主体）；其次来源多、正文长
+        durable = 0 if str(item.get("type") or "") in {"opinion", "question"} else 1
+        return (
+            durable,
+            len(item.get("source_message_ids") or []),
+            len(str(item.get("body_markdown") or item.get("summary") or "")),
+        )
+
+    ordered = sorted(items, key=score, reverse=True)
+    primary = dict(ordered[0])
+    extras = ordered[1:]
+
+    body = str(primary.get("body_markdown") or primary.get("summary") or "").rstrip()
+    for extra in extras:
+        title = str(extra.get("title") or "").strip() or "补充"
+        chunk = str(extra.get("body_markdown") or extra.get("summary") or "").strip()
+        if chunk:
+            body = f"{body}\n\n## 补充：{title}\n\n{chunk}"
+
+    merged_sources: list[str] = []
+    for item in ordered:
+        for sid in item.get("source_message_ids") or []:
+            if sid not in merged_sources:
+                merged_sources.append(sid)
+
+    entities: list[str] = []
+    for item in ordered:
+        for entity in item.get("entities") or []:
+            if entity not in entities:
+                entities.append(entity)
+
+    primary["body_markdown"] = body
+    primary["source_message_ids"] = merged_sources
+    primary["entities"] = entities
+    # 主体若命中过已有知识，折叠后仍然成立；主体没命中则用任一命中过的 id
+    candidate_ids: list[str] = []
+    for item in ordered:
+        for kid in item.get("candidate_existing_knowledge_ids") or []:
+            if kid not in candidate_ids:
+                candidate_ids.append(kid)
+    primary["candidate_existing_knowledge_ids"] = candidate_ids
+
+    get_logger().warning(
+        "extraction_items_folded",
+        extra={"extra_fields": {"from": len(items), "to": 1}},
+    )
+    return {**normalized, "items": [primary]}
 
 
 def _coerce_domain(value: Any) -> str:

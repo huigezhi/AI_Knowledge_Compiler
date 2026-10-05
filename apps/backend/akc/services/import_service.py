@@ -100,7 +100,16 @@ def import_conversation(
             )
 
     job_id: str | None = None
-    if options.get("compile") or settings.auto_compile:
+    # compile 为三态：显式 False 表示"这次不要编译"，优先级高于服务端 AKC_AUTO_COMPILE，
+    # 否则扩展里的「是否开启 AI 编译」开关关了也没用（服务端照样入队）。
+    compile_requested = options.get("compile")
+    if compile_requested is False:
+        should_compile = False
+    elif compile_requested is True:
+        should_compile = True
+    else:
+        should_compile = settings.auto_compile
+    if should_compile:
         job, _ = job_repo.enqueue(
             session,
             job_id=_new_id("job"),

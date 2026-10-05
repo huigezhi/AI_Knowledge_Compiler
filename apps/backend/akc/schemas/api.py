@@ -14,7 +14,15 @@ class ImportOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     write_raw_to_obsidian: bool = False
-    compile: bool = False
+    # 三态，不是布尔：
+    # * True  -> 明确要编译
+    # * False -> 明确不要编译（**覆盖**服务端的 AKC_AUTO_COMPILE）
+    # * None  -> 未表态，沿用服务端 AKC_AUTO_COMPILE
+    #
+    # 原来是 bool，导致"`compile: false` 或 `auto_compile: true`" 恒为真：
+    # 只要 .env 里开了 AKC_AUTO_COMPILE，客户端传什么都不编译也要编译，
+    # 扩展侧的「是否开启 AI 编译」开关将完全失效。
+    compile: bool | None = None
 
 
 class ImportRequest(BaseModel):

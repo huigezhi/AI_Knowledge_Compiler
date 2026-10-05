@@ -71,12 +71,30 @@
 
     <fieldset>
       <legend>AI 编译（提炼知识用）</legend>
+
+      <label>
+        <input id="ai-compile-enabled" type="checkbox" />
+        <strong>开启 AI 编译</strong>
+      </label>
+      <p class="hint">
+        这是<strong>总开关</strong>，保存后立即生效，不用重启后端、也不用再跑命令。
+        <br />
+        <span id="ai-compile-on-hint">开启：采集到的会话会送进 AI 编译，提炼成知识笔记。</span>
+        <br />
+        <span id="ai-compile-off-hint">
+          关闭：<strong>完全不编译</strong>——自动保存、后台静默同步、历史遍历、
+          「保存 + 编译」都不会再产生编译任务，只保留原始对话。
+          <br />
+          已在队列里的编译任务会跑完；<strong>已经生成的知识点不会丢失</strong>。
+        </span>
+      </p>
+
       <div id="llm-status">正在检查…</div>
       <p class="hint">
-        模型服务同样由<strong>后端</strong>配置（不在本设置页）。配置方法：双击
+        模型服务（Key / 模型）由<strong>后端</strong>配置（不在本设置页）。配置方法：双击
         <code>scripts\windows\set-llm.bat</code>，选 DeepSeek / Claude / 自建端点，
-        粘贴 API Key，它会先实测 Key 再写入并重启后端。关闭编译用
-        <code>akc.ps1 set-llm -Clear</code>。
+        粘贴 API Key，它会先实测 Key 再写入并重启后端。
+        本开关是更方便的即时开关，与后端配置是「或」的关系：任一方关闭即不编译。
       </p>
     </fieldset>
 
